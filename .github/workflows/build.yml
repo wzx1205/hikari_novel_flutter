@@ -26,9 +26,9 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
     
-    # 3. 设置 Flutter 环境（使用 v3 支持 Node.js 24）
+    # 3. 设置 Flutter 环境（使用 v2.23.0 支持 Node.js 24）
     - name: Setup Flutter
-      uses: subosito/flutter-action@v3
+      uses: subosito/flutter-action@v2.23.0
       with:
         flutter-version: '3.x'
         channel: 'stable'
