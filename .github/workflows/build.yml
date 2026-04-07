@@ -52,7 +52,6 @@ jobs:
     
     - name: Create Keystore
       run: |
-        # 生成固定的 keystore（使用固定的密码和别名）
         keytool -genkey -v -keystore android/upload-keystore.jks \
           -keyalg RSA -keysize 2048 -validity 10000 -alias upload \
           -storepass android -keypass android \
@@ -60,9 +59,7 @@ jobs:
     
     # 8. 构建签名 APK
     - name: Build Signed APK
-      run: |
-        cd android
-        ./gradlew assembleRelease
+      run: flutter build apk --release
     
     # 9. 上传 APK 产物
     - name: Upload APK
