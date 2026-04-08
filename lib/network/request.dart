@@ -18,9 +18,13 @@ import 'api.dart';
 
 /// 网络请求
 class Request {
+  // 更真实的 User-Agent（避免被 Cloudflare 识别为爬虫）
   static const userAgent = {
     io.HttpHeaders.userAgentHeader:
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+    'sec-ch-ua': '"Chromium";v="134", "Not:A-Brand";v="24"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
   };
 
   static final _dioCookieJar = ckjar.CookieJar();
@@ -33,6 +37,7 @@ class Request {
             validateStatus: (status) => status != null, //只要不是 null，就交给拦截器处理,
           ),
         )
+        ..interceptors.add(RetriesInterceptor()) // 添加重试拦截器
         ..interceptors.add(CloudflareInterceptor())
         ..interceptors.add(CookieManager(_dioCookieJar));
 
@@ -159,5 +164,33 @@ class CloudflareInterceptor extends Interceptor {
       return;
     }
     handler.reject(CloudflareChallengeException(requestOptions: response.requestOptions));
+  }
+}
+
+/// 重试拦截器（避免 Cloudflare 临时拦截）
+class RetriesInterceptor extends Interceptor {
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) async {
+    // 只在 Cloudflare 相关错误时重试
+    if (err.response?.statusCode == 403 || 
+        err.response?.statusCode == 503 ||
+        err.type == DioExceptionType.connectionTimeout) {
+      
+      Log.w('Request failed, retrying... (${err.response?.statusCode ?? "timeout"})');
+      
+      try {
+        // 等待 2 秒后重试
+        await Future.delayed(const Duration(seconds: 2));
+        
+        // 重试请求
+        final response = await err.requestOptions.retry();
+        handler.resolve(response);
+        return;
+      } catch (e) {
+        Log.e('Retry failed: $e');
+      }
+    }
+    
+    handler.next(err);
   }
 }
