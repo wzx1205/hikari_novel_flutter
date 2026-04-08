@@ -54,33 +54,6 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 检查初始化是否失败
-    if (_initError != null) {
-      return MaterialApp(
-        home: Scaffold(
-          body: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  const Icon(Icons.error_outline, size: 64, color: Colors.red),
-                  const SizedBox(height: 16),
-                  const Text('应用初始化失败', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Text(_initError!, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () => _initError = null,
-                    child: const Text('重试'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-    
     //自定义颜色
     Color brandColor = LocalStorageService.instance.getCustomColor();
     //深浅模式
