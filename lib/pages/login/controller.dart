@@ -55,6 +55,14 @@ class LoginController extends GetxController {
       if (hasCookie) {
         String cookie = "jieqiUserInfo=${getCookie.firstWhere((cookieItem) => cookieItem.name == "jieqiUserInfo").value};";
         cookie += "jieqiVisitInfo=${getCookie.firstWhere((cookieItem) => cookieItem.name == "jieqiVisitInfo").value}";
+        // 保存 cf_clearance Cookie（Cloudflare 验证必需）
+        final cfClearance = getCookie.firstWhere(
+          (c) => c.name == "cf_clearance",
+          orElse: () => Cookie(name: "cf_clearance", value: ""),
+        );
+        if (cfClearance.value.isNotEmpty) {
+          cookie += ";cf_clearance=${cfClearance.value}";
+        }
         LocalStorageService.instance.setCookie(cookie);
         Request.initCookie();
 
