@@ -34,11 +34,11 @@ jobs:
     - name: Get dependencies
       run: flutter pub get
     
-    # 5. 分析代码
+    # 5. 分析代码（仅警告，不失败）
     - name: Analyze
       run: flutter analyze || true
     
-    # 6. 运行测试
+    # 6. 运行测试（仅警告，不失败）
     - name: Run tests
       run: flutter test || true
     
@@ -50,11 +50,15 @@ jobs:
         echo "keyAlias=upload" >> android/key.properties
         echo "storeFile=../upload-keystore.jks" >> android/key.properties
     
-    # 使用已提交的 keystore 文件，不再重新生成
-    
-    # 8. 构建签名 APK
+    # 8. 构建签名 APK（显示详细日志）
     - name: Build Signed APK
-      run: flutter build apk --release
+      run: |
+        echo "=== 开始构建 APK ==="
+        flutter build apk --release --verbose
+        echo "=== 检查 APK 文件 ==="
+        ls -la build/app/outputs/flutter-apk/
+        echo "=== APK 文件大小 ==="
+        du -h build/app/outputs/flutter-apk/app-release.apk
     
     # 9. 上传 APK 产物
     - name: Upload APK
@@ -63,3 +67,4 @@ jobs:
         name: app-release
         path: build/app/outputs/flutter-apk/app-release.apk
         retention-days: 30
+        if-no-files-found: error
