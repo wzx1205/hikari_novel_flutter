@@ -57,12 +57,17 @@ class LoginController extends GetxController {
     if (uri.toString().contains("wenku8") == true) {
       final getCookie = await cookieManager.getCookies(url: uri);
 
+      // 检查必要 Cookie
       bool hasCookie = ["jieqiUserInfo", "jieqiVisitInfo"].every(
         (keyword) => getCookie.any((cookieItem) => cookieItem.name.contains(keyword)),
-      ); //getCookie.any((cookieItem) => cookieItem.name == "jieqiUserInfo");
+      );
       if (hasCookie) {
-        String cookie = "jieqiUserInfo=${getCookie.firstWhere((cookieItem) => cookieItem.name == "jieqiUserInfo").value};";
-        cookie += "jieqiVisitInfo=${getCookie.firstWhere((cookieItem) => cookieItem.name == "jieqiVisitInfo").value}";
+        // 保存所有 Cookie（包括 cf_clearance）
+        List<String> cookieParts = [];
+        for (var cookieItem in getCookie) {
+          cookieParts.add("${cookieItem.name}=${cookieItem.value}");
+        }
+        String cookie = cookieParts.join('; ');
         LocalStorageService.instance.setCookie(cookie);
         Request.initCookie();
 
