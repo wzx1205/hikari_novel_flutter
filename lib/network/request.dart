@@ -148,16 +148,42 @@ class CloudflareInterceptor extends Interceptor {
   @override
   void onResponse(Response<dynamic> response, ResponseInterceptorHandler handler) async {
     final statusCode = response.statusCode;
+    
+    // 处理 403 Forbidden
     if (statusCode == 403) {
+      Log.e("Cloudflare 403: ${response.requestOptions.uri}");
       handler.reject(Cloudflare403Exception(requestOptions: response.requestOptions));
       return;
     }
 
+    // 检查 Cloudflare 挑战
     final cfMitigated = response.headers['cf-mitigated'];
-    if (cfMitigated == null || !cfMitigated.contains('challenge')) {
-      handler.next(response);
+    if (cfMitigated != null && cfMitigated.contains('challenge')) {
+      Log.e("Cloudflare Challenge: ${response.requestOptions.uri}");
+      handler.reject(CloudflareChallengeException(requestOptions: response.requestOptions));
       return;
     }
-    handler.reject(CloudflareChallengeException(requestOptions: response.requestOptions));
+    
+    // 检查是否是 Cloudflare 挑战页面（HTML 中包含 cf-browser-verification 或 __cf_chl）
+    if (response.data is Uint8List) {
+      final html = String.fromCharCodes(response.data as Uint8List);
+      if (html.contains('cf-browser-verification') || html.contains('__cf_chl')) {
+        Log.e("Cloudflare Challenge Page detected: ${response.requestOptions.uri}");
+        handler.reject(CloudflareChallengeException(requestOptions: response.requestOptions));
+        return;
+      }
+    }
+    
+    handler.next(response);
+  }
+  
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) {
+    // 网络错误时尝试重试
+    if (err.type == DioExceptionType.connectionTimeout || 
+        err.type == DioExceptionType.receiveTimeout) {
+      Log.w("Network timeout, may be Cloudflare blocking: ${err.requestOptions.uri}");
+    }
+    handler.next(err);
   }
 }
