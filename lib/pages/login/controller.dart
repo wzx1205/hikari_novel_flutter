@@ -28,6 +28,14 @@ class LoginController extends GetxController {
     isInspectable: kDebugMode,
     userAgent: Request.userAgent[HttpHeaders.userAgentHeader],
     javaScriptEnabled: true,
+    // 允许混合内容（HTTP/HTTPS）
+    mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
+    // 允许文件访问
+    allowFileAccess: true,
+    // 允许本地存储
+    domStorageEnabled: true,
+    // 禁用第三方 Cookie（避免 Cloudflare 检测）
+    thirdPartyCookiesEnabled: false,
   );
   RxString currentUrl = "".obs;
 
