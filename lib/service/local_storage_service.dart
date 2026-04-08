@@ -6,6 +6,7 @@ import 'package:hikari_novel_flutter/hive_registrar.g.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../common/log.dart';
 import '../models/common/language.dart';
 import '../models/common/wenku8_node.dart';
 import '../models/dual_page_mode.dart';
