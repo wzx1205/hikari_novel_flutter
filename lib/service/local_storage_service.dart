@@ -62,13 +62,18 @@ class LocalStorageService extends GetxService {
       kReaderBottomStatusBarHorizontalSpacing = "readerBottomStatusBarHorizontalSpacing";
 
   Future<void> init() async {
-    final Directory dir = await getApplicationSupportDirectory();
-    final String path = dir.path;
-    Hive.init("$path/hive");
-    Hive.registerAdapters();
-    _setting = await Hive.openBox("setting");
-    _loginInfo = await Hive.openBox("loginInfo");
-    _reader = await Hive.openBox("reader");
+    try {
+      final Directory dir = await getApplicationSupportDirectory();
+      final String path = dir.path;
+      Hive.init("$path/hive");
+      Hive.registerAdapters();
+      _setting = await Hive.openBox("setting");
+      _loginInfo = await Hive.openBox("loginInfo");
+      _reader = await Hive.openBox("reader");
+    } catch (e) {
+      Log.e("LocalStorageService init failed: $e");
+      rethrow;
+    }
   }
 
   void setCookie(String? value) => _loginInfo.put(kCookie, value);
