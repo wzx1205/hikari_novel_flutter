@@ -183,8 +183,21 @@ class RetriesInterceptor extends Interceptor {
         await Future.delayed(const Duration(seconds: 2));
         
         // 重试请求（使用 dio 重试）
-        final dio = Dio(err.requestOptions);
-        final response = await dio.fetch(err.requestOptions);
+        final dio = Dio(BaseOptions(
+          headers: err.requestOptions.headers,
+          connectTimeout: err.requestOptions.connectTimeout,
+          receiveTimeout: err.requestOptions.receiveTimeout,
+          sendTimeout: err.requestOptions.sendTimeout,
+        ));
+        final response = await dio.request(
+          err.requestOptions.path,
+          options: Options(
+            method: err.requestOptions.method,
+            responseType: err.requestOptions.responseType,
+          ),
+          data: err.requestOptions.data,
+          queryParameters: err.requestOptions.queryParameters,
+        );
         handler.resolve(response);
         return;
       } catch (e) {
