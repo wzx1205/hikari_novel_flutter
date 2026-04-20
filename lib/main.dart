@@ -15,7 +15,6 @@ import 'package:hikari_novel_flutter/network/request.dart';
 import 'package:hikari_novel_flutter/router/app_pages.dart';
 import 'package:hikari_novel_flutter/router/route_path.dart';
 import 'package:hikari_novel_flutter/service/db_service.dart';
-import 'package:hikari_novel_flutter/service/dev_mode_service.dart';
 import 'package:hikari_novel_flutter/service/local_storage_service.dart';
 import 'package:hikari_novel_flutter/service/tts_service.dart';
 import 'package:jiffy/jiffy.dart';
@@ -28,7 +27,6 @@ void main() async {
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
 
   await Get.put(LocalStorageService()).init();
-  Get.put(DevModeService()).init();
   Get.put(DBService()).init();
   await Get.put(TtsService()).init();
 
@@ -168,16 +166,7 @@ void _init() {
     );
   }
 
-  EasyRefresh.defaultHeaderBuilder = () => ClassicHeader(
-    dragText: "drag_text_refresh".tr,
-    armedText: "armed_text_refresh".tr,
-    readyText: "ready_text_refresh".tr,
-    processingText: "processing_text_refresh".tr,
-    processedText: "processed_text_refresh".tr,
-    noMoreText: "no_more_text".tr,
-    failedText: "failed_text_refresh".tr,
-    messageText: "message_text".tr,
-  );
+  EasyRefresh.defaultHeaderBuilder = () => MaterialHeader();
   EasyRefresh.defaultFooterBuilder = () => ClassicFooter(
     dragText: "drag_text_load".tr,
     armedText: "armed_text_load".tr,

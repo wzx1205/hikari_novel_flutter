@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:hikari_novel_flutter/pages/about/view.dart';
 import 'package:hikari_novel_flutter/pages/cache_queue/view.dart';
-import 'package:hikari_novel_flutter/pages/dev_tools/view.dart';
 import 'package:hikari_novel_flutter/pages/comment/view.dart';
 import 'package:hikari_novel_flutter/pages/home/view.dart';
 import 'package:hikari_novel_flutter/pages/login/view.dart';
@@ -72,8 +71,6 @@ class AppRoutes {
         }
       case RoutePath.cacheQueue:
         return GetPageRoute(settings: settings, page: () => CacheQueuePage());
-      case RoutePath.devTools:
-        return GetPageRoute(settings: settings, page: () => const DevToolsPage());
       default:
         return null;
     }
