@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:get/get_utils/src/extensions/internacionalization.dart';
 import 'package:hikari_novel_flutter/common/constants.dart';
 
 class NormalTile extends StatelessWidget {
@@ -92,31 +91,29 @@ class SliderTile extends StatelessWidget {
   }
 }
 
-class RadioListDialog<T> extends StatelessWidget {
-  final T? value;
-  final String title;
-  final List<(T, String)> values;
-  final Widget Function(BuildContext, int)? subtitleBuilder;
-  final bool toggleable;
-
-  const RadioListDialog({super.key, required this.value, required this.values, required this.title, this.subtitleBuilder, this.toggleable = false});
-
-  @override
-  Widget build(BuildContext context) {
-    final titleMedium = TextTheme.of(context).titleMedium!;
-    return AlertDialog(
-      clipBehavior: Clip.hardEdge,
-      title: Text(title),
-      constraints: subtitleBuilder != null ? const BoxConstraints(maxWidth: 320, minWidth: 320) : null,
-      contentPadding: const EdgeInsets.symmetric(vertical: 12),
-      content: Material(
-        type: .transparency,
-        child: SingleChildScrollView(
-          child: RadioGroup<T>(
+Future<T?> showRadioListSheet<T>(
+  BuildContext context, {
+  required T value,
+  required List<(T, String)> values,
+  required String title,
+  Widget Function(BuildContext, int)? subtitleBuilder,
+  bool toggleable = false,
+}) {
+  return showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    enableDrag: true,
+    builder: (_) {
+      final titleMedium = TextTheme.of(context).titleMedium!;
+      return SafeArea(
+        child: _defaultBottomSheetColumn([
+          _defaultBottomSheetTitlePadding(context, title),
+          RadioGroup<T>(
             onChanged: (v) => Navigator.of(context).pop(v ?? value),
             groupValue: value,
             child: Column(
-              mainAxisSize: MainAxisSize.min,
+              mainAxisSize: .min,
               children: List.generate(values.length, (index) {
                 final item = values[index];
                 return RadioListTile<T>(
@@ -128,37 +125,34 @@ class RadioListDialog<T> extends StatelessWidget {
               }),
             ),
           ),
-        ),
-      ),
-      actions: [TextButton(onPressed: Navigator.of(context).pop, child: Text("cancel".tr))],
-    );
-  }
+        ]),
+      );
+    },
+  );
 }
 
-class NormalListDialog<T> extends StatelessWidget {
-  final String title;
-  final List<(T, String)> values;
-  final Widget Function(BuildContext, int)? subtitleBuilder;
-
-  const NormalListDialog({super.key, required this.values, required this.title, this.subtitleBuilder});
-
-  @override
-  Widget build(BuildContext context) {
-    final titleMedium = TextTheme.of(context).titleMedium!;
-    return AlertDialog(
-      clipBehavior: Clip.hardEdge,
-      title: Text(title),
-      constraints: subtitleBuilder != null ? const BoxConstraints(maxWidth: 320, minWidth: 320) : null,
-      contentPadding: const EdgeInsets.symmetric(vertical: 12),
-      content: Material(
-        type: .transparency,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+Future<T?> showNormalListSheet<T>(
+  BuildContext context, {
+  required String title,
+  required List<(T, String)> values,
+  Widget Function(BuildContext, int)? subtitleBuilder,
+}) {
+  return showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    enableDrag: true,
+    builder: (_) {
+      final titleMedium = TextTheme.of(context).titleMedium!;
+      return SafeArea(
+        child: _defaultBottomSheetColumn([
+          _defaultBottomSheetTitlePadding(context, title),
+          Column(
+            mainAxisSize: .min,
             children: List.generate(values.length, (index) {
               final item = values[index];
               return Padding(
-                padding: EdgeInsets.symmetric(horizontal: 18),
+                padding: EdgeInsets.symmetric(horizontal: 10),
                 child: ListTile(
                   title: Text(item.$2, style: titleMedium),
                   subtitle: subtitleBuilder?.call(context, index),
@@ -167,9 +161,19 @@ class NormalListDialog<T> extends StatelessWidget {
               );
             }),
           ),
-        ),
-      ),
-      actions: [TextButton(onPressed: Navigator.of(context).pop, child: Text("cancel".tr))],
-    );
-  }
+        ]),
+      );
+    },
+  );
 }
+
+Widget _defaultBottomSheetTitlePadding(BuildContext context, String title) {
+  final titleLarge = TextTheme.of(context).titleLarge!;
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(20, 10, 0, 20),
+    child: Text(title, style: titleLarge.copyWith(fontWeight: FontWeight.bold)),
+  );
+}
+
+Widget _defaultBottomSheetColumn(List<Widget> children) =>
+    Column(mainAxisSize: .min, crossAxisAlignment: .start, children: [...children, SizedBox(height: 10)]);

@@ -106,16 +106,15 @@ class ReaderSettingPage extends StatelessWidget {
             leading: const Icon(Icons.chrome_reader_mode_outlined),
             trailing: const Icon(Icons.keyboard_arrow_down),
             onTap: () =>
-                Get.dialog(
-                  RadioListDialog(
-                    value: controller.readerSettingsState.value.direction,
-                    values: [
-                      (ReaderDirection.upToDown, "scroll".tr),
-                      (ReaderDirection.leftToRight, "left_to_right".tr),
-                      (ReaderDirection.rightToLeft, "right_to_left".tr),
-                    ],
-                    title: "reading_direction".tr,
-                  ),
+                showRadioListSheet(
+                  context,
+                  value: controller.readerSettingsState.value.direction,
+                  values: [
+                    (ReaderDirection.upToDown, "scroll".tr),
+                    (ReaderDirection.leftToRight, "left_to_right".tr),
+                    (ReaderDirection.rightToLeft, "right_to_left".tr),
+                  ],
+                  title: "reading_direction".tr,
                 ).then((value) {
                   if (value != null) controller.changeReaderDirection(value);
                 }),
@@ -168,12 +167,11 @@ class ReaderSettingPage extends StatelessWidget {
               leading: const Icon(Icons.looks_two_outlined),
               trailing: const Icon(Icons.keyboard_arrow_down),
               onTap: () =>
-                  Get.dialog(
-                    RadioListDialog(
-                      value: controller.readerSettingsState.value.dualPageMode,
-                      values: [(DualPageMode.auto, "auto".tr), (DualPageMode.enabled, "enable".tr), (DualPageMode.disabled, "disable".tr)],
-                      title: "dual_page".tr,
-                    ),
+                  showRadioListSheet(
+                    context,
+                    value: controller.readerSettingsState.value.dualPageMode,
+                    values: [(DualPageMode.auto, "auto".tr), (DualPageMode.enabled, "enable".tr), (DualPageMode.disabled, "disable".tr)],
+                    title: "dual_page".tr,
                   ).then((value) {
                     if (value != null) controller.changeDualPageMode(value);
                   }),
@@ -214,7 +212,7 @@ class ReaderSettingPage extends StatelessWidget {
             subtitle: controller.isFontFileAvailable.value ? controller.readerSettingsState.value.textFamily.toString() : "system_font".tr,
             leading: const Icon(Icons.format_shapes_outlined),
             trailing: const Icon(Icons.keyboard_arrow_down),
-            onTap: () => Get.dialog(NormalListDialog(values: [(0, "system_font".tr), (1, "custom_font".tr)], title: "font".tr)).then((value) async {
+            onTap: () => showNormalListSheet(context, values: [(0, "system_font".tr), (1, "custom_font".tr)], title: "font".tr).then((value) async {
               if (value == 0) {
                 await controller.deleteFontDir();
                 controller.changeReaderTextStyleFilePath(null);
@@ -245,7 +243,7 @@ class ReaderSettingPage extends StatelessWidget {
             trailing: controller.currentTextColor.value == null
                 ? const Icon(Icons.keyboard_arrow_down)
                 : ColorIndicator(width: 20, height: 20, borderRadius: 100, color: controller.currentTextColor.value!),
-            onTap: () => Get.dialog(NormalListDialog(values: [(0, "change_font_color".tr), (1, "reset_font_color".tr)], title: "font_color".tr)).then((value) {
+            onTap: () => showNormalListSheet(context, values: [(0, "change_font_color".tr), (1, "reset_font_color".tr)], title: "font_color".tr).then((value) {
               if (value == 0) {
                 _buildColorPickerDialog(Get.context!, true);
               } else if (value == 1) {
@@ -263,7 +261,7 @@ class ReaderSettingPage extends StatelessWidget {
                 ? const Icon(Icons.keyboard_arrow_down)
                 : ColorIndicator(width: 20, height: 20, borderRadius: 100, color: controller.currentBgColor.value!),
             onTap: () =>
-                Get.dialog(NormalListDialog(values: [(0, "change_background_color".tr), (1, "reset_background_color".tr)], title: "background_color".tr)).then((
+                showNormalListSheet(context, values: [(0, "change_background_color".tr), (1, "reset_background_color".tr)], title: "background_color".tr).then((
                   value,
                 ) {
                   if (value == 0) {
@@ -279,7 +277,7 @@ class ReaderSettingPage extends StatelessWidget {
           title: "background_image".tr,
           leading: const Icon(Icons.image_outlined),
           trailing: const Icon(Icons.keyboard_arrow_down),
-          onTap: () => Get.dialog(NormalListDialog(values: [(0, "change_background_image".tr), (1, "reset_background_image".tr)], title: "background_image".tr))
+          onTap: () => showNormalListSheet(context, values: [(0, "change_background_image".tr), (1, "reset_background_image".tr)], title: "background_image".tr)
               .then((value) async {
                 if (value == 0) {
                   final result = await controller.pickBgImageFile(Get.context!.isDarkMode);
@@ -334,11 +332,10 @@ class ReaderSettingPage extends StatelessWidget {
                     trailing: const Icon(Icons.keyboard_arrow_down),
                     onTap: () async {
                       await tts.refreshEngines();
-                      Get.dialog(
-                        NormalListDialog(
-                          values: [(null, "auto".tr), ...tts.engines.map((value) => (value, tts.displayEngineName(value)))],
-                          title: "tts_engine".tr,
-                        ),
+                      showNormalListSheet(
+                        Get.context!,
+                        values: [(null, "auto".tr), ...tts.engines.map((value) => (value, tts.displayEngineName(value)))],
+                        title: "tts_engine".tr,
                       ).then((value) async {
                         if (value == null) {
                           tts.applyEngine(null);
@@ -358,11 +355,10 @@ class ReaderSettingPage extends StatelessWidget {
                     trailing: const Icon(Icons.keyboard_arrow_down),
                     onTap: () async {
                       await tts.refreshVoices();
-                      Get.dialog(
-                        NormalListDialog(
-                          values: [(null, "auto".tr), ...tts.voices.map((value) => (value, "${value["name"]}(${value["locale"]})"))],
-                          title: "timbre".tr,
-                        ),
+                      showNormalListSheet(
+                        Get.context!,
+                        values: [(null, "auto".tr), ...tts.voices.map((value) => (value, "${value["name"]}(${value["locale"]})"))],
+                        title: "timbre".tr,
                       ).then((value) async {
                         if (value == null) {
                           tts.applyVoice(null);
