@@ -1,13 +1,13 @@
 import 'package:easy_refresh/easy_refresh.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:hikari_novel_flutter/common/log.dart';
 import 'package:hikari_novel_flutter/models/reader_direction.dart';
 import 'package:hikari_novel_flutter/pages/reader/controller.dart';
 import 'package:hikari_novel_flutter/pages/reader/widgets/custom_header.dart';
 import 'package:hikari_novel_flutter/pages/reader/widgets/custom_slider.dart';
 import 'package:hikari_novel_flutter/pages/reader/widgets/horizontal_read_page.dart';
 import 'package:hikari_novel_flutter/pages/reader/widgets/reader_background.dart';
+import 'package:hikari_novel_flutter/pages/reader/widgets/reader_setting.dart';
 import 'package:hikari_novel_flutter/pages/reader/widgets/vertical_read_page.dart';
 import 'package:hikari_novel_flutter/widgets/state_page.dart';
 import 'package:intl/intl.dart';
@@ -61,11 +61,7 @@ class ReaderPage extends StatelessWidget {
                 ? ReaderBackground(
                     child: Obx(
                       () => Padding(
-                        padding: EdgeInsets.only(
-                          bottom: _useOverlayBottomStatusBar()
-                              ? kStatusBarPadding + MediaQuery.of(context).padding.bottom
-                              : 0,
-                        ),
+                        padding: EdgeInsets.only(bottom: _useOverlayBottomStatusBar() ? kStatusBarPadding + MediaQuery.of(context).padding.bottom : 0),
                         child: _buildReadPage(context),
                       ),
                     ),
@@ -127,7 +123,16 @@ class ReaderPage extends StatelessWidget {
                             child: IconButton(onPressed: () => _showCatalogue(context), icon: const Icon(Icons.list_alt)),
                           ),
                           Expanded(
-                            child: IconButton(onPressed: () => Get.toNamed(RoutePath.readerSetting), icon: const Icon(Icons.settings_outlined)),
+                            child: IconButton(
+                              onPressed: () => showModalBottomSheet(
+                                context: context,
+                                isScrollControlled: true,
+                                showDragHandle: true,
+                                useSafeArea: true,
+                                builder: (_) => ReaderSettingPage(),
+                              ),
+                              icon: const Icon(Icons.settings_outlined),
+                            ),
                           ),
                           TtsService.instance.enabled.value
                               ? Expanded(
@@ -467,10 +472,7 @@ class ReaderPage extends StatelessWidget {
       child: Obx(
         () => Offstage(
           offstage: !(_useOverlayBottomStatusBar() && controller.pageState.value == PageState.success),
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(spacing, 0, spacing, MediaQuery.of(context).padding.bottom),
-            child: _buildStatusBarContent(context),
-          ),
+          child: Padding(padding: EdgeInsets.fromLTRB(spacing, 0, spacing, MediaQuery.of(context).padding.bottom), child: _buildStatusBarContent(context)),
         ),
       ),
     );
@@ -482,10 +484,7 @@ class ReaderPage extends StatelessWidget {
     return SizedBox(
       width: double.infinity,
       height: kStatusBarPadding.toDouble() + bottomInset,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(spacing, 0, spacing, bottomInset),
-        child: _buildStatusBarContent(context),
-      ),
+      child: Padding(padding: EdgeInsets.fromLTRB(spacing, 0, spacing, bottomInset), child: _buildStatusBarContent(context)),
     );
   }
 
@@ -513,10 +512,7 @@ class ReaderPage extends StatelessWidget {
           const Spacer(),
           controller.readerSettingsState.value.direction == ReaderDirection.upToDown
               ? Text("${controller.verticalProgress.value} %", style: TextStyle(fontSize: 13, color: textColor))
-              : Text(
-                  "${controller.currentIndex.value + 1} / ${controller.maxPage.value}",
-                  style: TextStyle(fontSize: 13, color: textColor),
-                ),
+              : Text("${controller.currentIndex.value + 1} / ${controller.maxPage.value}", style: TextStyle(fontSize: 13, color: textColor)),
         ],
       );
     });
