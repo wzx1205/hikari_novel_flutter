@@ -31,8 +31,6 @@ class RoutePath {
 
   static const search = "/search";
 
-  static const readerSetting = "/reader_setting";
-
   static const cacheQueue = "/cache_queue";
 
   static const userBookshelf = "/user_bookshelf";
