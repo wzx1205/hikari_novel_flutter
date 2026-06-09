@@ -22,6 +22,10 @@ import 'package:jiffy/jiffy.dart';
 final localhostServer = InAppLocalhostServer(documentRoot: 'assets');
 WebViewEnvironment? webViewEnvironment;
 
+bool get _isAndroid => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+bool get _isWindows => !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
 void main() async {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
@@ -30,11 +34,11 @@ void main() async {
   Get.put(DBService()).init();
   await Get.put(TtsService()).init();
 
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+  if (_isWindows) {
     final availableVersion = await WebViewEnvironment.getAvailableVersion();
     assert(availableVersion != null, 'Failed to find an installed WebView2 runtime or non-stable Microsoft Edge installation.');
     webViewEnvironment = await WebViewEnvironment.create(settings: WebViewEnvironmentSettings(userDataFolder: 'custom_path'));
-  } else if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+  } else if (_isAndroid) {
     await InAppWebViewController.setWebContentsDebuggingEnabled(kDebugMode);
   }
 
@@ -59,7 +63,7 @@ class MyApp extends StatelessWidget {
     //是否动态取色
     bool isDynamicColor = LocalStorageService.instance.getIsDynamicColor();
 
-    if (Platform.isAndroid) {
+    if (_isAndroid) {
       return AndroidApp(brandColor: brandColor, isDynamicColor: isDynamicColor, currentThemeValue: currentThemeValue);
     } else {
       return OtherApp(brandColor: brandColor, currentThemeValue: currentThemeValue);
@@ -134,15 +138,16 @@ class BuildMainApp extends StatelessWidget {
       title: kAppName,
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: currentThemeValue == ThemeMode.dark ? darkColorScheme : lightColorScheme,
+        colorScheme: lightColorScheme,
         snackBarTheme: snackBarTheme,
         pageTransitionsTheme: const PageTransitionsTheme(
           builders: <TargetPlatform, PageTransitionsBuilder>{TargetPlatform.android: ZoomPageTransitionsBuilder(allowEnterRouteSnapshotting: false)},
         ),
         //页面切换动画
-        fontFamily: Platform.isWindows ? "Microsoft YaHei" : null,
+        fontFamily: _isWindows ? "Microsoft YaHei" : null,
       ),
-      darkTheme: ThemeData(useMaterial3: true, colorScheme: currentThemeValue == ThemeMode.light ? lightColorScheme : darkColorScheme),
+      darkTheme: ThemeData(useMaterial3: true, colorScheme: darkColorScheme),
+      themeMode: currentThemeValue,
       translations: AppTranslations(),
       locale: Util.getCurrentLocale(),
       fallbackLocale: Locale("zh", "CN"),
@@ -154,7 +159,7 @@ class BuildMainApp extends StatelessWidget {
 
 void _init() {
   // 小白条、导航栏沉浸
-  if (Platform.isAndroid) {
+  if (_isAndroid) {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
