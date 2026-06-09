@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -59,35 +58,47 @@ class PaperCurlPager extends StatefulWidget {
   State<PaperCurlPager> createState() => _PaperCurlPagerState();
 }
 
-class _PaperCurlPagerState extends State<PaperCurlPager> with SingleTickerProviderStateMixin {
+class _PaperCurlPagerState extends State<PaperCurlPager>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
-  final ValueNotifier<_PaperPoint> _paper = ValueNotifier<_PaperPoint>(_PaperPoint(const math.Point<double>(0, 0), const Size(1, 1)));
 
   Size _size = Size.zero;
   Offset _downPos = Offset.zero;
-  math.Point<double> _currentA = const math.Point<double>(0, 0);
-  bool _isForward = true;
-  bool _isAnimating = false;
-  bool _useClip = false;
+  Offset _dragPos = Offset.zero;
+  Offset _animStartPos = Offset.zero;
+  Offset _animEndPos = Offset.zero;
   bool _fromTop = false;
+  bool _isDragging = false;
+  bool _isAnimating = false;
+  bool _turningForward = true;
   int _index = 0;
-
-  bool get _dragStartsFromTopHalf => _downPos.dy <= (_size.height / 2);
-
-  Offset _logicalOffset(Offset physical) {
-    if (!widget.reverse || _size.width <= 0) return physical;
-    return Offset((_size.width - physical.dx).clamp(0.0, _size.width), physical.dy);
-  }
+  int? _targetIndex;
+  double _progress = 0;
+  double _dragDelta = 0;
+  Curve _releaseCurve = Curves.easeInOutCubic;
 
   int get _lastIndex => widget.pages.isEmpty ? 0 : widget.pages.length - 1;
+
+  int get _forwardDelta => widget.reverse ? -1 : 1;
+
+  int get _backwardDelta => -_forwardDelta;
+
+  bool get _currentPageInteractive =>
+      widget.interactivePageIndices.contains(_index);
+
+  bool get _canGoForward =>
+      widget.pages.isNotEmpty && _targetForDirection(true) != _index;
+
+  bool get _canGoBackward =>
+      widget.pages.isNotEmpty && _targetForDirection(false) != _index;
 
   @override
   void initState() {
     super.initState();
     _index = _safeIndex(widget.initialIndex);
     _controller = AnimationController(vsync: this, duration: _effectiveDuration)
-      ..addListener(_handleAnimationTick)
-      ..addStatusListener(_handleAnimationStatus);
+      ..addListener(_handleTick)
+      ..addStatusListener(_handleStatus);
     widget.controller?._bind(_jumpToExternal);
   }
 
@@ -103,10 +114,11 @@ class _PaperCurlPagerState extends State<PaperCurlPager> with SingleTickerProvid
       _controller.duration = newDuration;
     }
     final safeInitial = _safeIndex(widget.initialIndex);
-    final needResetIndex = widget.pages.length != oldWidget.pages.length || safeInitial != _index;
-    if (!_isAnimating && needResetIndex) {
+    final shouldReset =
+        widget.pages.length != oldWidget.pages.length || safeInitial != _index;
+    if (!_isDragging && !_isAnimating && shouldReset) {
       _index = safeInitial;
-      _resetToIdle();
+      _resetGestureState(notify: false);
     }
   }
 
@@ -114,148 +126,174 @@ class _PaperCurlPagerState extends State<PaperCurlPager> with SingleTickerProvid
   void dispose() {
     widget.controller?._unbind(_jumpToExternal);
     _controller.dispose();
-    _paper.dispose();
     super.dispose();
   }
 
-  Duration get _effectiveDuration => widget.animationEnabled ? widget.duration : const Duration(milliseconds: 1);
+  Duration get _effectiveDuration => widget.animationEnabled
+      ? widget.duration
+      : const Duration(milliseconds: 1);
 
   int _safeIndex(int raw) {
     if (widget.pages.isEmpty) return 0;
     return raw.clamp(0, widget.pages.length - 1);
   }
 
-  bool get _currentPageInteractive => widget.interactivePageIndices.contains(_index);
+  int _targetForDirection(bool forward) {
+    if (widget.pages.isEmpty) return 0;
+    final delta = forward ? _forwardDelta : _backwardDelta;
+    return (_index + delta).clamp(0, _lastIndex);
+  }
 
   void _jumpToExternal(int target) {
     final safeTarget = _safeIndex(target);
-    if (_index == safeTarget && !_isAnimating) return;
+    if (_index == safeTarget && !_isAnimating && !_isDragging) {
+      return;
+    }
     _controller.stop();
     _index = safeTarget;
-    _resetToIdle();
+    _resetGestureState();
     widget.onIndexChanged?.call(_index);
   }
 
-  math.Point<double> _idlePoint() => math.Point(_size.width, _fromTop ? 0 : _size.height);
+  void _resetGestureState({bool notify = true}) {
+    _isDragging = false;
+    _isAnimating = false;
+    _turningForward = true;
+    _targetIndex = null;
+    _progress = 0;
+    _dragDelta = 0;
+    _downPos = Offset.zero;
+    _dragPos = Offset.zero;
+    _animStartPos = Offset.zero;
+    _animEndPos = Offset.zero;
+    if (notify && mounted) {
+      setState(() {});
+    }
+  }
 
-  _PaperPoint _makePaper(math.Point<double> point) {
-    if (_size.width <= 0 || _size.height <= 0) {
-      return _PaperPoint(point, _size);
+  void _handleTick() {
+    if (!_isAnimating) return;
+    final t = _releaseCurve.transform(_controller.value);
+    setState(() {
+      _dragPos = Offset(
+        _lerp(_animStartPos.dx, _animEndPos.dx, t),
+        _lerp(_animStartPos.dy, _animEndPos.dy, t),
+      );
+      _dragDelta = _dragPos.dx - _downPos.dx;
+      _progress = _progressForCurrentDrag();
+    });
+  }
+
+  void _handleStatus(AnimationStatus status) {
+    if (status != AnimationStatus.completed) return;
+    final didComplete =
+        _targetIndex != null &&
+        (_turningForward
+            ? _dragPos.dx <= 0.5
+            : _dragPos.dx >= _size.width - 0.5);
+    if (didComplete) {
+      _index = _targetIndex!;
+      widget.onIndexChanged?.call(_index);
     }
-    if (_fromTop) {
-      return _PaperPoint(math.Point(point.x, _size.height - point.y), _size);
-    }
-    return _PaperPoint(point, _size);
+    _resetGestureState();
   }
 
   void _ensureSize(Size size) {
     if (_size == size) return;
     _size = size;
-    if (_size.width <= 0 || _size.height <= 0) return;
-    _useClip = false;
+  }
+
+  Offset _logicalOffset(Offset physical) {
+    if (!widget.reverse || _size.width <= 0) return physical;
+    return Offset(
+      (_size.width - physical.dx).clamp(0.0, _size.width),
+      physical.dy,
+    );
+  }
+
+  void _startGesture({required bool forward, required Offset localPos}) {
+    _turningForward = forward;
+    _targetIndex = _targetForDirection(forward);
+    _fromTop = localPos.dy <= (_size.height / 2);
+    _isDragging = true;
     _isAnimating = false;
-    _isForward = true;
-    _currentA = _idlePoint();
-    _paper.value = _makePaper(_currentA);
+    _downPos = localPos;
+    _dragPos = localPos;
+    _dragDelta = 0;
+    _progress = 0;
   }
 
-  void _resetToIdle() {
-    if (_size.width <= 0 || _size.height <= 0) return;
-    _useClip = false;
-    _isAnimating = false;
-    _isForward = true;
-    _currentA = _idlePoint();
-    _paper.value = _makePaper(_currentA);
-    if (mounted) setState(() {});
+  double _progressForCurrentDrag() {
+    if (_size.width <= 0) return 0;
+    return (_dragDelta.abs() / _size.width).clamp(0.0, 1.0);
   }
 
-  void _handleAnimationTick() {
-    if (_size.width <= 0 || _size.height <= 0) return;
-    final targetY = _fromTop ? 0.0 : _size.height;
-    if (_isForward) {
-      _paper.value = _makePaper(math.Point(
-        _currentA.x - (_currentA.x + _size.width) * _controller.value,
-        _currentA.y + (targetY - _currentA.y) * _controller.value,
-      ));
-    } else {
-      _paper.value = _makePaper(math.Point(
-        _currentA.x + (_size.width - _currentA.x) * _controller.value,
-        _currentA.y + (targetY - _currentA.y) * _controller.value,
-      ));
-    }
+  void _updateDrag(Offset localPos) {
+    _dragPos = Offset(
+      localPos.dx.clamp(0.0, _size.width),
+      localPos.dy.clamp(0.0, _size.height),
+    );
+    _dragDelta = _dragPos.dx - _downPos.dx;
+    _progress = _progressForCurrentDrag();
   }
 
-  void _handleAnimationStatus(AnimationStatus status) {
-    if (status != AnimationStatus.completed) return;
-    final changed = _isForward;
-    _isAnimating = false;
-    _useClip = false;
-    _paper.value = _makePaper(_idlePoint());
-    if (mounted) {
-      setState(() {});
-    }
-    if (changed) {
-      _index = (_index + 1).clamp(0, _lastIndex);
-    }
-    widget.onIndexChanged?.call(_index);
+  Offset _releaseTarget(bool complete) {
+    final targetX = complete
+        ? (_turningForward ? 0.0 : _size.width)
+        : _downPos.dx;
+    final targetY = _fromTop ? _size.height * 0.18 : _size.height * 0.82;
+    return Offset(targetX, targetY);
   }
 
-  void _animateNext({bool fromTop = false}) {
-    if (_isAnimating || widget.pages.isEmpty || _index >= _lastIndex) {
-      return;
-    }
-    final startY = fromTop ? 28.0.clamp(1.0, _size.height) : (_size.height - 28).clamp(1.0, _size.height);
-    setState(() {
-      _useClip = true;
-      _isAnimating = true;
-      _isForward = true;
-      _fromTop = fromTop;
-      _currentA = math.Point((_size.width - 28).clamp(1.0, _size.width), startY);
-      _paper.value = _makePaper(_currentA);
-    });
+  void _animateRelease({required bool complete, required Curve curve}) {
+    _isDragging = false;
+    _isAnimating = true;
+    _releaseCurve = curve;
+    _animStartPos = _dragPos;
+    _animEndPos = _releaseTarget(complete);
     _controller.forward(from: 0);
   }
 
-  void _animatePrev({bool fromTop = false}) {
-    if (_isAnimating || widget.pages.isEmpty || _index <= 0) {
+  void _animateTapTurn(bool forward, {required bool fromTop}) {
+    if ((forward && !_canGoForward) || (!forward && !_canGoBackward)) {
       return;
     }
-    final startY = fromTop ? 100.0.clamp(1.0, _size.height) : (_size.height - 100).clamp(1.0, _size.height);
-    setState(() {
-      _useClip = true;
-      _isAnimating = true;
-      _isForward = false;
-      _fromTop = fromTop;
-      _index = (_index - 1).clamp(0, _lastIndex);
-      _currentA = math.Point(-200, startY);
-      _paper.value = _makePaper(_currentA);
-    });
-    _controller.forward(from: 0);
+    final startX = forward ? _size.width * 0.92 : _size.width * 0.08;
+    final startY = fromTop ? _size.height * 0.18 : _size.height * 0.82;
+    _startGesture(forward: forward, localPos: Offset(startX, startY));
+    _dragPos = Offset(
+      forward ? _size.width * 0.76 : _size.width * 0.24,
+      startY,
+    );
+    _dragDelta = _dragPos.dx - _downPos.dx;
+    _progress = _progressForCurrentDrag();
+    _animateRelease(complete: true, curve: Curves.easeInOutCubic);
   }
 
   void _handleTap(TapUpDetails details) {
     if (_size.width <= 0 || _size.height <= 0) return;
-    if (_currentPageInteractive) {
-      return;
-    }
+    if (_currentPageInteractive) return;
     final pos = _logicalOffset(details.localPosition);
-    final x = pos.dx;
     final left = _size.width * widget.edgeTapWidthFactor;
     final right = _size.width * (1 - widget.edgeTapWidthFactor);
     final fromTop = pos.dy <= (_size.height / 2);
-    if (x <= left) {
-      if (_index <= 0) {
+    if (pos.dx <= left) {
+      if (!_canGoBackward) {
         widget.onReachStart?.call();
       } else {
-        _animatePrev(fromTop: fromTop);
+        setState(() {
+          _animateTapTurn(false, fromTop: fromTop);
+        });
       }
       return;
     }
-    if (x >= right) {
-      if (_index >= _lastIndex) {
+    if (pos.dx >= right) {
+      if (!_canGoForward) {
         widget.onReachEnd?.call();
       } else {
-        _animateNext(fromTop: fromTop);
+        setState(() {
+          _animateTapTurn(true, fromTop: fromTop);
+        });
       }
       return;
     }
@@ -263,123 +301,183 @@ class _PaperCurlPagerState extends State<PaperCurlPager> with SingleTickerProvid
   }
 
   void _handlePanDown(DragDownDetails details) {
-    _downPos = _logicalOffset(details.localPosition);
-    _fromTop = _downPos.dy <= (_size.height / 2);
+    if (_size.width <= 0 || _size.height <= 0) return;
+    _controller.stop();
+    _isAnimating = false;
+    final localPos = _logicalOffset(details.localPosition);
+    _downPos = localPos;
+    _dragPos = localPos;
+    _dragDelta = 0;
+    _progress = 0;
   }
 
   void _handlePanUpdate(DragUpdateDetails details) {
-    if (_isAnimating || widget.pages.isEmpty) return;
-    if (_index >= _lastIndex) return;
-    final move = _logicalOffset(details.localPosition);
-    if (move.dx >= _size.width || move.dx < 0 || move.dy >= _size.height || move.dy < 0) {
+    if (widget.pages.isEmpty || _size.width <= 0 || _size.height <= 0) {
       return;
     }
-    if (_downPos.dx < _size.width / 2) {
-      return;
-    }
-    if (!_useClip) {
+    final localPos = _logicalOffset(details.localPosition);
+    if (!_isDragging) {
+      final delta = localPos - _downPos;
+      if (delta.distanceSquared < 16) {
+        return;
+      }
+      final forward = delta.dx < 0;
+      if (forward && !_canGoForward) {
+        widget.onReachEnd?.call();
+        return;
+      }
+      if (!forward && !_canGoBackward) {
+        widget.onReachStart?.call();
+        return;
+      }
       setState(() {
-        _useClip = true;
+        _startGesture(forward: forward, localPos: _downPos);
+        _updateDrag(localPos);
       });
+      return;
     }
-    _fromTop = _dragStartsFromTopHalf;
-    if (_downPos.dy > _size.height / 3 && _downPos.dy < _size.height * 2 / 3) {
-      final lockedY = _fromTop ? 1.0 : (_size.height - 1);
-      _currentA = math.Point(move.dx, lockedY);
-      _paper.value = _makePaper(_currentA);
-    } else {
-      final clampedY = move.dy.clamp(0.0, _size.height);
-      _currentA = math.Point(move.dx, clampedY);
-      _paper.value = _makePaper(_currentA);
-    }
-    _isForward = ((_size.width - move.dx) / _size.width) > 0.33;
+    setState(() {
+      _updateDrag(localPos);
+    });
   }
 
   void _handlePanEnd(DragEndDetails details) {
-    if (_isAnimating || widget.pages.isEmpty) {
-      return;
-    }
-    if (_downPos.dx < _size.width / 2) {
-      if (_index <= 0) {
-        widget.onReachStart?.call();
-      } else {
-        _animatePrev(fromTop: _dragStartsFromTopHalf);
-      }
-      return;
-    }
-    if (_index >= _lastIndex) {
-      _resetToIdle();
-      widget.onReachEnd?.call();
-      return;
-    }
-    if (!_useClip) {
-      return;
-    }
-    _isAnimating = true;
-    _controller.forward(from: 0);
+    if (!_isDragging) return;
+    final velocity = details.velocity.pixelsPerSecond.dx;
+    final logicalVelocity = widget.reverse ? -velocity : velocity;
+    final flingForward = logicalVelocity < -500;
+    final flingBackward = logicalVelocity > 500;
+    final shouldComplete = _turningForward
+        ? (_progress > 0.2 || (_progress > 0.05 && flingForward))
+        : (_progress > 0.2 || (_progress > 0.05 && flingBackward));
+    _animateRelease(
+      complete: shouldComplete,
+      curve: shouldComplete ? Curves.easeInOutCubic : Curves.easeOutQuart,
+    );
   }
 
   Widget _pageAt(int index) {
     if (widget.pages.isEmpty || index < 0 || index >= widget.pages.length) {
       return const SizedBox.shrink();
     }
-    final background = widget.backgroundColor ?? Theme.of(context).colorScheme.surface;
-    Widget page = ColoredBox(color: background, child: SizedBox.expand(child: widget.pages[index]));
+    final background =
+        widget.backgroundColor ?? Theme.of(context).colorScheme.surface;
+    Widget page = ColoredBox(
+      color: background,
+      child: SizedBox.expand(child: widget.pages[index]),
+    );
     if (widget.reverse) {
-      page = Transform(alignment: Alignment.center, transform: Matrix4.diagonal3Values(-1, 1, 1), child: page);
+      page = Transform(
+        alignment: Alignment.center,
+        transform: Matrix4.diagonal3Values(-1, 1, 1),
+        child: page,
+      );
     }
     return page;
-  }
-
-  Widget _buildInternalPager() {
-    if (widget.pages.isEmpty) return const SizedBox.shrink();
-    final underIndex = (_index + 1).clamp(0, _lastIndex);
-    final background = widget.backgroundColor ?? Theme.of(context).colorScheme.surface;
-    final backside = widget.backsideColor ?? Color.lerp(background, Colors.black, Theme.of(context).brightness == Brightness.dark ? 0.24 : 0.14)!;
-    return DecoratedBox(
-      decoration: BoxDecoration(color: background),
-      child: ClipRect(
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapUp: _handleTap,
-          onPanDown: _handlePanDown,
-          onPanUpdate: _handlePanUpdate,
-          onPanEnd: _handlePanEnd,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              ColoredBox(color: background, child: const SizedBox.expand()),
-              _pageAt(underIndex),
-              ClipPath(
-                clipper: _useClip ? _CurrentPaperClipper(_paper, _isForward, _fromTop) : null,
-                child: _pageAt(_index),
-              ),
-              IgnorePointer(
-                child: CustomPaint(
-                  painter: _BookPainter(
-                    _paper,
-                    backside,
-                    fromTop: _fromTop,
-                    gutterColor: Theme.of(context).colorScheme.shadow.withOpacity(Theme.of(context).brightness == Brightness.dark ? 0.42 : 0.18),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final size = Size(constraints.maxWidth, constraints.maxHeight);
-        _ensureSize(size);
-        Widget child = _buildInternalPager();
+        _ensureSize(Size(constraints.maxWidth, constraints.maxHeight));
+        final background =
+            widget.backgroundColor ?? Theme.of(context).colorScheme.surface;
+        final backside =
+            widget.backsideColor ??
+            Color.lerp(
+              background,
+              Colors.black,
+              Theme.of(context).brightness == Brightness.dark ? 0.18 : 0.08,
+            )!;
+        final showTurn =
+            (_isDragging || _isAnimating) &&
+            _targetIndex != null &&
+            _progress > 0.0001;
+        final underIndex = showTurn ? _targetIndex! : _index;
+        final fold = _FoldGeometry.fromDrag(
+          size: _size,
+          dragPos: _dragPos,
+          progress: _progress,
+          forward: _turningForward,
+          fromTop: _fromTop,
+        );
+
+        Widget child = DecoratedBox(
+          decoration: BoxDecoration(color: background),
+          child: ClipRect(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapUp: _handleTap,
+              onPanDown: _handlePanDown,
+              onPanUpdate: _handlePanUpdate,
+              onPanEnd: _handlePanEnd,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ColoredBox(color: background, child: const SizedBox.expand()),
+                  _pageAt(underIndex),
+                  if (showTurn)
+                    CustomPaint(
+                      painter: _FoldShadowPainter(
+                        geometry: fold,
+                        shadowColor: Colors.black.withOpacity(
+                          Theme.of(context).brightness == Brightness.dark
+                              ? 0.34
+                              : 0.22,
+                        ),
+                      ),
+                    ),
+                  if (showTurn)
+                    ClipPath(
+                      clipper: _PageRevealClipper(fold),
+                      child: _pageAt(_index),
+                    )
+                  else
+                    _pageAt(_index),
+                  if (showTurn)
+                    IgnorePointer(
+                      child: ClipPath(
+                        clipper: _FoldFrontClipper(fold),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: _turningForward
+                                  ? Alignment.centerRight
+                                  : Alignment.centerLeft,
+                              end: _turningForward
+                                  ? Alignment.centerLeft
+                                  : Alignment.centerRight,
+                              colors: [
+                                backside.withOpacity(0.96),
+                                Color.lerp(backside, background, 0.48)!,
+                                Color.lerp(background, Colors.white, 0.08)!,
+                              ],
+                              stops: const [0.0, 0.6, 1.0],
+                            ),
+                          ),
+                          child: CustomPaint(
+                            painter: _FoldHighlightPainter(
+                              geometry: fold,
+                              shadowColor: Colors.black.withOpacity(0.10),
+                              highlightColor: Colors.white.withOpacity(0.24),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+
         if (widget.reverse) {
-          child = Transform(alignment: Alignment.center, transform: Matrix4.diagonal3Values(-1, 1, 1), child: child);
+          child = Transform(
+            alignment: Alignment.center,
+            transform: Matrix4.diagonal3Values(-1, 1, 1),
+            child: child,
+          );
         }
         return child;
       },
@@ -387,263 +485,207 @@ class _PaperCurlPagerState extends State<PaperCurlPager> with SingleTickerProvid
   }
 }
 
-class _CurrentPaperClipper extends CustomClipper<Path> {
-  const _CurrentPaperClipper(this.paper, this.isForward, this.fromTop) : super(reclip: paper);
+class _FoldGeometry {
+  const _FoldGeometry({
+    required this.size,
+    required this.progress,
+    required this.forward,
+    required this.fromTop,
+    required this.foldX,
+    required this.spineX,
+    required this.controlY,
+    required this.depth,
+    required this.shadowWidth,
+  });
 
-  final ValueNotifier<_PaperPoint> paper;
-  final bool isForward;
+  final Size size;
+  final double progress;
+  final bool forward;
   final bool fromTop;
+  final double foldX;
+  final double spineX;
+  final double controlY;
+  final double depth;
+  final double shadowWidth;
 
-  Offset _offset(math.Point<double> point, Size size) => Offset(point.x, fromTop ? size.height - point.y : point.y);
-
-  @override
-  Path getClip(Size size) {
-    final full = Path()..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
-    if (paper.value.a == paper.value.f || paper.value.a.x <= -size.width) {
-      return isForward ? Path() : full;
-    }
-    final c = _offset(paper.value.c, size);
-    final e = _offset(paper.value.e, size);
-    final b = _offset(paper.value.b, size);
-    final a = _offset(paper.value.a, size);
-    final k = _offset(paper.value.k, size);
-    final h = _offset(paper.value.h, size);
-    final j = _offset(paper.value.j, size);
-    final f = _offset(paper.value.f, size);
-    final folded = Path()
-      ..moveTo(c.dx, c.dy)
-      ..quadraticBezierTo(e.dx, e.dy, b.dx, b.dy)
-      ..lineTo(a.dx, a.dy)
-      ..lineTo(k.dx, k.dy)
-      ..quadraticBezierTo(h.dx, h.dy, j.dx, j.dy)
-      ..lineTo(f.dx, f.dy)
-      ..close();
-    return Path.combine(PathOperation.reverseDifference, folded, full);
+  static _FoldGeometry fromDrag({
+    required Size size,
+    required Offset dragPos,
+    required double progress,
+    required bool forward,
+    required bool fromTop,
+  }) {
+    final safeWidth = size.width <= 0 ? 1.0 : size.width;
+    final safeHeight = size.height <= 0 ? 1.0 : size.height;
+    final clampedProgress = progress.clamp(0.0, 1.0);
+    final foldX = dragPos.dx.clamp(0.0, safeWidth);
+    final depth = math.max(8.0, math.min(18.0, 8.0 + safeWidth * 0.028));
+    final spineX = forward
+        ? math.min(safeWidth, foldX + depth)
+        : math.max(0.0, foldX - depth);
+    final anchorY = dragPos.dy.clamp(0.0, safeHeight);
+    final settleY = fromTop ? safeHeight * 0.5 : safeHeight * 0.5;
+    final controlY = _lerp(anchorY, settleY, 0.72).clamp(0.0, safeHeight);
+    final shadowWidth = math.max(12.0, 40.0 * clampedProgress);
+    return _FoldGeometry(
+      size: size,
+      progress: clampedProgress,
+      forward: forward,
+      fromTop: fromTop,
+      foldX: foldX,
+      spineX: spineX,
+      controlY: controlY,
+      depth: depth,
+      shadowWidth: shadowWidth,
+    );
   }
 
-  @override
-  bool shouldReclip(covariant _CurrentPaperClipper oldClipper) => paper != oldClipper.paper || isForward != oldClipper.isForward || fromTop != oldClipper.fromTop;
+  Path get frontPath {
+    final outerX = forward ? foldX + depth : foldX - depth;
+    return Path()
+      ..moveTo(foldX, 0)
+      ..quadraticBezierTo(spineX, controlY, foldX, size.height)
+      ..lineTo(outerX, size.height)
+      ..quadraticBezierTo(spineX, controlY, outerX, 0)
+      ..close();
+  }
+
+  Path get revealPath {
+    if (forward) {
+      return Path()..addRect(Rect.fromLTWH(0, 0, foldX, size.height));
+    }
+    return Path()
+      ..addRect(Rect.fromLTWH(foldX, 0, size.width - foldX, size.height));
+  }
 }
 
-class _BookPainter extends CustomPainter {
-  _BookPainter(this.paper, this.backsideColor, {required this.gutterColor, required this.fromTop}) : super(repaint: paper);
+class _PageRevealClipper extends CustomClipper<Path> {
+  const _PageRevealClipper(this.geometry);
 
-  final ValueNotifier<_PaperPoint> paper;
-  final Color backsideColor;
-  final Color gutterColor;
-  final bool fromTop;
+  final _FoldGeometry geometry;
 
-  Offset _offset(math.Point<double> point, Size size) => Offset(point.x, fromTop ? size.height - point.y : point.y);
+  @override
+  Path getClip(Size size) => geometry.revealPath;
 
-  Path _pathFromPoints(Size size, List<math.Point<double>> points) {
-    final out = Path();
-    if (points.isEmpty) return out;
-    final first = _offset(points.first, size);
-    out.moveTo(first.dx, first.dy);
-    for (final point in points.skip(1)) {
-      final mapped = _offset(point, size);
-      out.lineTo(mapped.dx, mapped.dy);
-    }
-    out.close();
-    return out;
-  }
+  @override
+  bool shouldReclip(covariant _PageRevealClipper oldClipper) =>
+      oldClipper.geometry != geometry;
+}
+
+class _FoldFrontClipper extends CustomClipper<Path> {
+  const _FoldFrontClipper(this.geometry);
+
+  final _FoldGeometry geometry;
+
+  @override
+  Path getClip(Size size) => geometry.frontPath;
+
+  @override
+  bool shouldReclip(covariant _FoldFrontClipper oldClipper) =>
+      oldClipper.geometry != geometry;
+}
+
+class _FoldShadowPainter extends CustomPainter {
+  const _FoldShadowPainter({required this.geometry, required this.shadowColor});
+
+  final _FoldGeometry geometry;
+  final Color shadowColor;
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.clipRect(Offset.zero & size);
-    final p = paper.value;
-    if (p.a == p.f || p.a.y == p.f.y) {
-      return;
-    }
-    final c = _offset(p.c, size);
-    final e = _offset(p.e, size);
-    final b = _offset(p.b, size);
-    final a = _offset(p.a, size);
-    final k = _offset(p.k, size);
-    final h = _offset(p.h, size);
-    final j = _offset(p.j, size);
-    final f = _offset(p.f, size);
-    final d = _offset(p.d, size);
-    final i = _offset(p.i, size);
-    final p1 = _offset(p.p1, size);
-    final p2 = _offset(p.p2, size);
-    final g = _offset(p.g, size);
-    final ab = Path()
-      ..moveTo(c.dx, c.dy)
-      ..quadraticBezierTo(e.dx, e.dy, b.dx, b.dy)
-      ..lineTo(a.dx, a.dy)
-      ..lineTo(k.dx, k.dy)
-      ..quadraticBezierTo(h.dx, h.dy, j.dx, j.dy)
-      ..lineTo(f.dx, f.dy)
+    if (geometry.progress <= 0) return;
+    final rect = geometry.forward
+        ? Rect.fromLTWH(geometry.foldX, 0, geometry.shadowWidth, size.height)
+        : Rect.fromLTWH(
+            geometry.foldX - geometry.shadowWidth,
+            0,
+            geometry.shadowWidth,
+            size.height,
+          );
+    final paint = Paint()
+      ..shader = LinearGradient(
+        begin: geometry.forward ? Alignment.centerLeft : Alignment.centerRight,
+        end: geometry.forward ? Alignment.centerRight : Alignment.centerLeft,
+        colors: [
+          shadowColor.withOpacity(0.4 * geometry.progress),
+          shadowColor.withOpacity(0.1 * geometry.progress),
+          shadowColor.withOpacity(0.0),
+        ],
+      ).createShader(rect);
+    canvas.drawRect(rect, paint);
+
+    final edgePaint = Paint()
+      ..color = shadowColor.withOpacity(0.3 * geometry.progress)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+    final edgePath = Path()
+      ..moveTo(geometry.foldX, 0)
+      ..lineTo(geometry.foldX + (geometry.forward ? 3 : -3), 0)
+      ..lineTo(geometry.foldX + (geometry.forward ? 3 : -3), size.height)
+      ..lineTo(geometry.foldX, size.height)
       ..close();
-    final triangleB = Path()
-      ..moveTo(d.dx, d.dy)
-      ..lineTo(a.dx, a.dy)
-      ..lineTo(i.dx, i.dy)
-      ..close();
-    final aShadowPaint = Paint()..style = PaintingStyle.fill;
-    final xP1Delta = p.a.x - p.p1.x;
-    final yP1Delta = p.a.y - p.p1.y;
-    final aShadowLeftBezier = Path()
-      ..moveTo(_offset(math.Point(p.c.x - xP1Delta, p.c.y), size).dx, _offset(math.Point(p.c.x - xP1Delta, p.c.y), size).dy)
-      ..quadraticBezierTo(
-        _offset(math.Point(p.e.x - xP1Delta, p.e.y - yP1Delta), size).dx,
-        _offset(math.Point(p.e.x - xP1Delta, p.e.y - yP1Delta), size).dy,
-        _offset(math.Point(p.b.x - xP1Delta, p.b.y - yP1Delta), size).dx,
-        _offset(math.Point(p.b.x - xP1Delta, p.b.y - yP1Delta), size).dy,
-      )
-      ..lineTo(p1.dx, p1.dy)
-      ..lineTo(k.dx, k.dy)
-      ..lineTo(f.dx, f.dy)
-      ..close();
-    final xP2Delta = p.a.x - p.p2.x;
-    final yP2Delta = p.a.y - p.p2.y;
-    final aShadowRight = Path()
-      ..moveTo(_offset(math.Point(p.j.x, p.j.y - yP2Delta), size).dx, _offset(math.Point(p.j.x, p.j.y - yP2Delta), size).dy)
-      ..quadraticBezierTo(
-        _offset(math.Point(p.i.x - xP2Delta, p.i.y - yP2Delta), size).dx,
-        _offset(math.Point(p.i.x - xP2Delta, p.i.y - yP2Delta), size).dy,
-        _offset(math.Point(p.k.x - xP2Delta, p.k.y - yP2Delta), size).dx,
-        _offset(math.Point(p.k.x - xP2Delta, p.k.y - yP2Delta), size).dy,
-      )
-      ..lineTo(p2.dx, p2.dy)
-      ..lineTo(b.dx, b.dy)
-      ..lineTo(f.dx, f.dy)
-      ..close();
-    final combineShadowLeft = Path.combine(PathOperation.reverseDifference, ab, aShadowLeftBezier);
-    final combineShadowRight = Path.combine(PathOperation.reverseDifference, ab, aShadowRight);
-    canvas.drawPath(combineShadowLeft, aShadowPaint..shader = ui.Gradient.linear(a, p1, [Colors.black26, Colors.transparent]));
-    canvas.drawPath(combineShadowRight, aShadowPaint..shader = ui.Gradient.linear(a, p2, [Colors.black26, Colors.transparent]));
-    final crossPoint = _calculateIntersectionOfTwoLines(
-      math.Point(p.b.x - xP1Delta, p.b.y - yP1Delta),
-      p.p1,
-      p.p2,
-      math.Point(p.k.x - xP2Delta, p.k.y - yP2Delta),
-    );
-    final crossOffset = _offset(crossPoint, size);
-    final crossShadowLeft = Path()..moveTo(a.dx, a.dy)..lineTo(crossOffset.dx, crossOffset.dy)..lineTo(p1.dx, p1.dy)..close();
-    canvas.drawPath(crossShadowLeft, aShadowPaint..shader = ui.Gradient.linear(a, p1, [Colors.black26, Colors.transparent]));
-    final crossShadowRight = Path()..moveTo(a.dx, a.dy)..lineTo(crossOffset.dx, crossOffset.dy)..lineTo(p2.dx, p2.dy)..close();
-    canvas.drawPath(crossShadowRight, aShadowPaint..shader = ui.Gradient.linear(a, p2, [Colors.black26, Colors.transparent]));
-    final backsidePaint = Paint()..style = PaintingStyle.fill;
-    final regionB = Path.combine(PathOperation.intersect, ab, triangleB);
-    canvas.drawPath(regionB, backsidePaint..color = backsideColor);
-    final bShadow = _pathFromPoints(size, [p.c, p.j, p.h, p.e]);
-    final combineToBC = Path.combine(PathOperation.intersect, bShadow, ab);
-    final combineToC = Path.combine(PathOperation.difference, combineToBC, regionB);
-    final uRaw = _calculateIntersectionOfTwoLines(p.a, p.f, p.d, p.i);
-    final u = _offset(uRaw, size);
-    canvas.drawPath(combineToC, backsidePaint..shader = ui.Gradient.linear(u, g, [Colors.black38, Colors.transparent]));
+    canvas.drawPath(edgePath, edgePaint);
   }
 
   @override
-  bool shouldRepaint(covariant _BookPainter oldDelegate) => oldDelegate.paper != paper || oldDelegate.backsideColor != backsideColor || oldDelegate.gutterColor != gutterColor || oldDelegate.fromTop != fromTop;
+  bool shouldRepaint(covariant _FoldShadowPainter oldDelegate) =>
+      oldDelegate.geometry != geometry ||
+      oldDelegate.shadowColor != shadowColor;
 }
 
-class _PaperPoint {
-  _PaperPoint(this.a, this.size, {this.elevationC = 10}) {
-    f = math.Point(size.width, size.height);
-    if ((a.x - f.x).abs() < 0.001 && (a.y - f.y).abs() < 0.001) {
-      g = f;
-      b = f;
-      c = f;
-      d = f;
-      e = f;
-      h = f;
-      i = f;
-      j = f;
-      k = f;
-      p1 = f;
-      p2 = f;
-      return;
-    }
-    g = math.Point((a.x + f.x) / 2, (a.y + f.y) / 2);
-    e = math.Point(g.x - (math.pow(f.y - g.y, 2) / (f.x - g.x)), f.y);
-    var cx = e.x - (f.x - e.x) / 2;
-    if (a.x > 0 && cx <= 0) {
-      final fc = f.x - cx;
-      final fa = f.x - a.x;
-      final bb1 = size.width * fa / fc;
-      final fd1 = f.y - a.y;
-      final fd = bb1 * fd1 / fa;
-      a = math.Point(f.x - bb1, f.y - fd);
-      g = math.Point((a.x + f.x) / 2, (a.y + f.y) / 2);
-      e = math.Point(g.x - (math.pow((f - g).y, 2) / (f - g).x), f.y);
-      cx = 0;
-    }
-    c = math.Point(cx, f.y);
-    h = math.Point(f.x, g.y - (math.pow((f - g).x, 2) / (f.y - g.y)));
-    j = math.Point(f.x, h.y - (f.y - h.y) / 2);
-    final ah = _calculateLineEquation(a, h);
-    final ae = _calculateLineEquation(a, e);
-    b = _calculateIntersectionOfTwoLines(c, j, a, e);
-    k = _calculateIntersectionOfTwoLines(c, j, a, h);
-    final tp = math.Point((c.x + b.x) / 2, (c.y + b.y) / 2);
-    final to = math.Point((j.x + k.x) / 2, (j.y + k.y) / 2);
-    d = math.Point((tp.x + e.x) / 2, (tp.y + e.y) / 2);
-    i = math.Point((to.x + h.x) / 2, (to.y + h.y) / 2);
-    p1 = _projectPointToLine(ah, elevationC);
-    p2 = _projectPointToLine(ae, elevationC);
+class _FoldHighlightPainter extends CustomPainter {
+  const _FoldHighlightPainter({
+    required this.geometry,
+    required this.shadowColor,
+    required this.highlightColor,
+  });
+
+  final _FoldGeometry geometry;
+  final Color shadowColor;
+  final Color highlightColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (geometry.progress <= 0) return;
+
+    final edgeRect = geometry.forward
+        ? Rect.fromLTWH(geometry.foldX, 0, 15, size.height)
+        : Rect.fromLTWH(geometry.foldX - 15, 0, 15, size.height);
+    final edgeHighlightPaint = Paint()
+      ..shader = LinearGradient(
+        begin: geometry.forward ? Alignment.centerLeft : Alignment.centerRight,
+        end: geometry.forward ? Alignment.centerRight : Alignment.centerLeft,
+        colors: [
+          highlightColor.withOpacity(0.9),
+          highlightColor.withOpacity(0.0),
+        ],
+      ).createShader(edgeRect);
+    canvas.drawRect(edgeRect, edgeHighlightPaint);
+
+    final foldRect = geometry.forward
+        ? Rect.fromLTWH(geometry.foldX, 0, geometry.depth, size.height)
+        : Rect.fromLTWH(
+            geometry.foldX - geometry.depth,
+            0,
+            geometry.depth,
+            size.height,
+          );
+    final foldShadePaint = Paint()
+      ..shader = LinearGradient(
+        begin: geometry.forward ? Alignment.centerLeft : Alignment.centerRight,
+        end: geometry.forward ? Alignment.centerRight : Alignment.centerLeft,
+        colors: [
+          highlightColor.withOpacity(0.7 * geometry.progress),
+          shadowColor.withOpacity(0.06 * geometry.progress),
+        ],
+      ).createShader(foldRect);
+    canvas.drawRect(foldRect, foldShadePaint);
   }
 
-  math.Point<double> a;
-  final double elevationC;
-  late math.Point<double> f;
-  late math.Point<double> p1;
-  late math.Point<double> p2;
-  late math.Point<double> b, c, d, e;
-  late math.Point<double> h, i, j, k;
-  late math.Point<double> g;
-  final Size size;
+  @override
+  bool shouldRepaint(covariant _FoldHighlightPainter oldDelegate) =>
+      oldDelegate.geometry != geometry ||
+      oldDelegate.shadowColor != shadowColor ||
+      oldDelegate.highlightColor != highlightColor;
 }
 
-class _Line {
-  const _Line(this.a, this.b, this.slope, this.intercept);
-
-  final math.Point<double> a;
-  final math.Point<double> b;
-  final double slope;
-  final double intercept;
-}
-
-_Line _calculateLineEquation(math.Point<double> p1, math.Point<double> p2) {
-  double slope = 0;
-  double intercept = 0;
-  if (p1.x == p2.x) {
-    if (p1.y == p2.y) {
-      slope = double.nan;
-    } else {
-      slope = p1.y > p2.y ? double.infinity : double.negativeInfinity;
-    }
-  } else {
-    slope = (p1.y - p2.y) / (p1.x - p2.x);
-  }
-  if (slope.isNaN || slope.isInfinite) {
-    intercept = double.nan;
-  } else {
-    intercept = p1.y - slope * p1.x;
-  }
-  return _Line(p1, p2, slope, intercept);
-}
-
-math.Point<double> _calculateIntersectionOfTwoLines(math.Point<double> a, math.Point<double> b, math.Point<double> m, math.Point<double> n) {
-  final line1 = _calculateLineEquation(a, b);
-  final line2 = _calculateLineEquation(m, n);
-  final x = (line2.intercept - line1.intercept) / (line1.slope - line2.slope);
-  final y = x * line1.slope + line1.intercept;
-  return math.Point(x, y);
-}
-
-math.Point<double> _projectPointToLine(_Line line, double distance) {
-  final slope = line.slope;
-  late final double x;
-  late final double y;
-  if (slope > 0 || line.a.y >= line.b.y) {
-    x = line.a.x - math.sqrt(distance * distance / (1 + (slope * slope)));
-    y = line.a.y - math.sqrt(distance * distance / (1 + (slope * slope))) * slope;
-  } else {
-    x = line.a.x + math.sqrt(distance * distance / (1 + (slope * slope)));
-    y = line.a.y + math.sqrt(distance * distance / (1 + (slope * slope))) * slope;
-  }
-  return math.Point(x, y);
-}
+double _lerp(num a, num b, double t) => a + (b - a) * t;
