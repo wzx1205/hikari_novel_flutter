@@ -68,6 +68,7 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
   Offset _animStartPos = Offset.zero;
   Offset _animEndPos = Offset.zero;
   bool _fromTop = false;
+  bool _fromSide = false;
   bool _isDragging = false;
   bool _isAnimating = false;
   bool _turningForward = true;
@@ -159,6 +160,7 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
     _isDragging = false;
     _isAnimating = false;
     _turningForward = true;
+    _fromSide = false;
     _targetIndex = null;
     _progress = 0;
     _dragDelta = 0;
@@ -214,7 +216,9 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
   void _startGesture({required bool forward, required Offset localPos}) {
     _turningForward = forward;
     _targetIndex = _targetForDirection(forward);
-    _fromTop = localPos.dy <= (_size.height / 2);
+    _fromSide =
+        localPos.dy > _size.height / 3 && localPos.dy < _size.height * 2 / 3;
+    _fromTop = !_fromSide && localPos.dy <= (_size.height / 2);
     _isDragging = true;
     _isAnimating = false;
     _downPos = localPos;
@@ -239,9 +243,15 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
 
   Offset _releaseTarget(bool complete) {
     final targetX = complete
-        ? (_turningForward ? 0.0 : _size.width)
+        ? (_turningForward ? -_size.width * 0.16 : _size.width * 1.16)
         : _downPos.dx;
-    final targetY = _fromTop ? _size.height * 0.18 : _size.height * 0.82;
+    final targetY = complete
+        ? (_fromSide
+              ? _downPos.dy
+                    .clamp(0.1, math.max(0.1, _size.height - 0.1))
+                    .toDouble()
+              : (_fromTop ? 0.1 : math.max(0.1, _size.height - 0.1)))
+        : _downPos.dy;
     return Offset(targetX, targetY);
   }
 
@@ -401,6 +411,7 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
           progress: _progress,
           forward: _turningForward,
           fromTop: _fromTop,
+          fromSide: _fromSide,
         );
 
         Widget child = DecoratedBox(
@@ -416,12 +427,19 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
                 fit: StackFit.expand,
                 children: [
                   ColoredBox(color: background, child: const SizedBox.expand()),
-                  _pageAt(underIndex),
+                  if (showTurn)
+                    ClipPath(
+                      clipper: _NextPageClipper(fold),
+                      child: _pageAt(underIndex),
+                    )
+                  else
+                    _pageAt(underIndex),
                   if (showTurn)
                     CustomPaint(
-                      painter: _FoldShadowPainter(
+                      painter: _UnderPageShadowPainter(
                         geometry: fold,
-                        shadowColor: Colors.black.withOpacity(
+                        shadowColor: _alpha(
+                          Colors.black,
                           Theme.of(context).brightness == Brightness.dark
                               ? 0.34
                               : 0.22,
@@ -430,7 +448,7 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
                     ),
                   if (showTurn)
                     ClipPath(
-                      clipper: _PageRevealClipper(fold),
+                      clipper: _CurrentPageClipper(fold),
                       child: _pageAt(_index),
                     )
                   else
@@ -438,31 +456,54 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
                   if (showTurn)
                     IgnorePointer(
                       child: ClipPath(
-                        clipper: _FoldFrontClipper(fold),
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: _turningForward
-                                  ? Alignment.centerRight
-                                  : Alignment.centerLeft,
-                              end: _turningForward
-                                  ? Alignment.centerLeft
-                                  : Alignment.centerRight,
-                              colors: [
-                                backside.withOpacity(0.96),
-                                Color.lerp(backside, background, 0.48)!,
-                                Color.lerp(background, Colors.white, 0.08)!,
-                              ],
-                              stops: const [0.0, 0.6, 1.0],
+                        clipper: _FoldBackClipper(fold),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Transform(
+                              transform: fold.backTransform,
+                              filterQuality: FilterQuality.low,
+                              child: _pageAt(_index),
                             ),
-                          ),
-                          child: CustomPaint(
-                            painter: _FoldHighlightPainter(
-                              geometry: fold,
-                              shadowColor: Colors.black.withOpacity(0.10),
-                              highlightColor: Colors.white.withOpacity(0.24),
+                            ColoredBox(
+                              color: _alpha(
+                                backside,
+                                Theme.of(context).brightness == Brightness.dark
+                                    ? 0.64
+                                    : 0.52,
+                              ),
                             ),
-                          ),
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: _turningForward
+                                      ? Alignment.centerRight
+                                      : Alignment.centerLeft,
+                                  end: _turningForward
+                                      ? Alignment.centerLeft
+                                      : Alignment.centerRight,
+                                  colors: [
+                                    Color.lerp(
+                                      backside,
+                                      background,
+                                      0.18,
+                                    )!.withValues(alpha: 0.84),
+                                    Color.lerp(
+                                      backside,
+                                      background,
+                                      0.62,
+                                    )!.withValues(alpha: 0.76),
+                                    Color.lerp(
+                                      background,
+                                      Colors.white,
+                                      0.14,
+                                    )!.withValues(alpha: 0.40),
+                                  ],
+                                  stops: const [0.0, 0.55, 1.0],
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -486,27 +527,38 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
 }
 
 class _FoldGeometry {
-  const _FoldGeometry({
+  _FoldGeometry({
     required this.size,
     required this.progress,
     required this.forward,
     required this.fromTop,
-    required this.foldX,
-    required this.spineX,
-    required this.controlY,
-    required this.depth,
-    required this.shadowWidth,
-  });
+    required this.fromSide,
+    required this.touch,
+    required this.corner,
+  }) {
+    _calculate();
+  }
 
   final Size size;
   final double progress;
   final bool forward;
   final bool fromTop;
-  final double foldX;
-  final double spineX;
-  final double controlY;
-  final double depth;
-  final double shadowWidth;
+  final bool fromSide;
+  final Offset touch;
+  final Offset corner;
+
+  late Offset bezierStart1;
+  late Offset bezierControl1;
+  late Offset bezierVertex1;
+  late Offset bezierEnd1;
+  late Offset bezierStart2;
+  late Offset bezierControl2;
+  late Offset bezierVertex2;
+  late Offset bezierEnd2;
+  late Offset adjustedTouch;
+  late double touchToCornerDistance;
+  late bool isRightTopOrLeftBottom;
+  late Matrix4 backTransform;
 
   static _FoldGeometry fromDrag({
     required Size size,
@@ -514,178 +566,417 @@ class _FoldGeometry {
     required double progress,
     required bool forward,
     required bool fromTop,
+    required bool fromSide,
   }) {
     final safeWidth = size.width <= 0 ? 1.0 : size.width;
     final safeHeight = size.height <= 0 ? 1.0 : size.height;
-    final clampedProgress = progress.clamp(0.0, 1.0);
-    final foldX = dragPos.dx.clamp(0.0, safeWidth);
-    final depth = math.max(8.0, math.min(18.0, 8.0 + safeWidth * 0.028));
-    final spineX = forward
-        ? math.min(safeWidth, foldX + depth)
-        : math.max(0.0, foldX - depth);
-    final anchorY = dragPos.dy.clamp(0.0, safeHeight);
-    final settleY = fromTop ? safeHeight * 0.5 : safeHeight * 0.5;
-    final controlY = _lerp(anchorY, settleY, 0.72).clamp(0.0, safeHeight);
-    final shadowWidth = math.max(12.0, 40.0 * clampedProgress);
+    final safeTouchY = dragPos.dy
+        .clamp(0.1, math.max(0.1, safeHeight - 0.1))
+        .toDouble();
     return _FoldGeometry(
       size: size,
-      progress: clampedProgress,
+      progress: progress.clamp(0.0, 1.0),
       forward: forward,
       fromTop: fromTop,
-      foldX: foldX,
-      spineX: spineX,
-      controlY: controlY,
-      depth: depth,
-      shadowWidth: shadowWidth,
+      fromSide: fromSide,
+      touch: Offset(
+        dragPos.dx.clamp(-safeWidth * 0.25, safeWidth * 1.25).toDouble(),
+        safeTouchY,
+      ),
+      corner: Offset(
+        forward ? safeWidth : 0.0,
+        fromSide ? safeTouchY : (fromTop ? 0.0 : safeHeight),
+      ),
     );
   }
 
-  Path get frontPath {
-    final outerX = forward ? foldX + depth : foldX - depth;
-    return Path()
-      ..moveTo(foldX, 0)
-      ..quadraticBezierTo(spineX, controlY, foldX, size.height)
-      ..lineTo(outerX, size.height)
-      ..quadraticBezierTo(spineX, controlY, outerX, 0)
-      ..close();
-  }
+  double get maxLength =>
+      math.sqrt(size.width * size.width + size.height * size.height);
 
-  Path get revealPath {
-    if (forward) {
-      return Path()..addRect(Rect.fromLTWH(0, 0, foldX, size.height));
+  double get foldShadowExtent => math.max(18.0, touchToCornerDistance / 4.0);
+
+  double get shadowAngle =>
+      math.atan2(bezierControl1.dx - corner.dx, bezierControl2.dy - corner.dy);
+
+  Path get turnedPagePath {
+    if (fromSide) {
+      final outerX = forward
+          ? math.min(size.width, adjustedTouch.dx + sideFoldWidth)
+          : math.max(0.0, adjustedTouch.dx - sideFoldWidth);
+      return Path()
+        ..moveTo(adjustedTouch.dx, 0)
+        ..lineTo(adjustedTouch.dx, size.height)
+        ..lineTo(outerX, size.height)
+        ..lineTo(outerX, 0)
+        ..close();
     }
     return Path()
-      ..addRect(Rect.fromLTWH(foldX, 0, size.width - foldX, size.height));
-  }
-}
-
-class _PageRevealClipper extends CustomClipper<Path> {
-  const _PageRevealClipper(this.geometry);
-
-  final _FoldGeometry geometry;
-
-  @override
-  Path getClip(Size size) => geometry.revealPath;
-
-  @override
-  bool shouldReclip(covariant _PageRevealClipper oldClipper) =>
-      oldClipper.geometry != geometry;
-}
-
-class _FoldFrontClipper extends CustomClipper<Path> {
-  const _FoldFrontClipper(this.geometry);
-
-  final _FoldGeometry geometry;
-
-  @override
-  Path getClip(Size size) => geometry.frontPath;
-
-  @override
-  bool shouldReclip(covariant _FoldFrontClipper oldClipper) =>
-      oldClipper.geometry != geometry;
-}
-
-class _FoldShadowPainter extends CustomPainter {
-  const _FoldShadowPainter({required this.geometry, required this.shadowColor});
-
-  final _FoldGeometry geometry;
-  final Color shadowColor;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (geometry.progress <= 0) return;
-    final rect = geometry.forward
-        ? Rect.fromLTWH(geometry.foldX, 0, geometry.shadowWidth, size.height)
-        : Rect.fromLTWH(
-            geometry.foldX - geometry.shadowWidth,
-            0,
-            geometry.shadowWidth,
-            size.height,
-          );
-    final paint = Paint()
-      ..shader = LinearGradient(
-        begin: geometry.forward ? Alignment.centerLeft : Alignment.centerRight,
-        end: geometry.forward ? Alignment.centerRight : Alignment.centerLeft,
-        colors: [
-          shadowColor.withOpacity(0.4 * geometry.progress),
-          shadowColor.withOpacity(0.1 * geometry.progress),
-          shadowColor.withOpacity(0.0),
-        ],
-      ).createShader(rect);
-    canvas.drawRect(rect, paint);
-
-    final edgePaint = Paint()
-      ..color = shadowColor.withOpacity(0.3 * geometry.progress)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
-    final edgePath = Path()
-      ..moveTo(geometry.foldX, 0)
-      ..lineTo(geometry.foldX + (geometry.forward ? 3 : -3), 0)
-      ..lineTo(geometry.foldX + (geometry.forward ? 3 : -3), size.height)
-      ..lineTo(geometry.foldX, size.height)
+      ..moveTo(bezierStart1.dx, bezierStart1.dy)
+      ..quadraticBezierTo(
+        bezierControl1.dx,
+        bezierControl1.dy,
+        bezierEnd1.dx,
+        bezierEnd1.dy,
+      )
+      ..lineTo(adjustedTouch.dx, adjustedTouch.dy)
+      ..lineTo(bezierEnd2.dx, bezierEnd2.dy)
+      ..quadraticBezierTo(
+        bezierControl2.dx,
+        bezierControl2.dy,
+        bezierStart2.dx,
+        bezierStart2.dy,
+      )
+      ..lineTo(corner.dx, corner.dy)
       ..close();
-    canvas.drawPath(edgePath, edgePaint);
   }
 
-  @override
-  bool shouldRepaint(covariant _FoldShadowPainter oldDelegate) =>
-      oldDelegate.geometry != geometry ||
-      oldDelegate.shadowColor != shadowColor;
+  Path get currentPagePath {
+    return Path.combine(
+      PathOperation.difference,
+      Path()..addRect(Offset.zero & size),
+      turnedPagePath,
+    );
+  }
+
+  Path get nextPagePath {
+    if (fromSide) {
+      if (forward) {
+        return Path()
+          ..addRect(Rect.fromLTWH(0, 0, adjustedTouch.dx, size.height));
+      }
+      return Path()..addRect(
+        Rect.fromLTWH(
+          adjustedTouch.dx,
+          0,
+          size.width - adjustedTouch.dx,
+          size.height,
+        ),
+      );
+    }
+    return Path()
+      ..moveTo(bezierStart1.dx, bezierStart1.dy)
+      ..lineTo(bezierVertex1.dx, bezierVertex1.dy)
+      ..lineTo(bezierVertex2.dx, bezierVertex2.dy)
+      ..lineTo(bezierStart2.dx, bezierStart2.dy)
+      ..lineTo(corner.dx, corner.dy)
+      ..close();
+  }
+
+  Path get backPath {
+    if (fromSide) return turnedPagePath;
+    return Path()
+      ..moveTo(bezierVertex2.dx, bezierVertex2.dy)
+      ..lineTo(bezierVertex1.dx, bezierVertex1.dy)
+      ..lineTo(bezierEnd1.dx, bezierEnd1.dy)
+      ..lineTo(adjustedTouch.dx, adjustedTouch.dy)
+      ..lineTo(bezierEnd2.dx, bezierEnd2.dy)
+      ..close();
+  }
+
+  Path get backVisiblePath {
+    if (fromSide) return turnedPagePath;
+    return Path.combine(PathOperation.intersect, turnedPagePath, backPath);
+  }
+
+  void _calculate() {
+    final width = math.max(1.0, size.width);
+    final height = math.max(1.0, size.height);
+    if (fromSide) {
+      adjustedTouch = Offset(
+        touch.dx.clamp(0.0, width),
+        touch.dy.clamp(0.1, math.max(0.1, height - 0.1)),
+      );
+      final innerX = adjustedTouch.dx;
+      final outerX = forward
+          ? math.min(width, innerX + sideFoldWidth)
+          : math.max(0.0, innerX - sideFoldWidth);
+      bezierStart1 = Offset(innerX, 0);
+      bezierControl1 = Offset(innerX, 0);
+      bezierVertex1 = Offset(outerX, 0);
+      bezierEnd1 = Offset(outerX, 0);
+      bezierStart2 = Offset(innerX, height);
+      bezierControl2 = Offset(innerX, height);
+      bezierVertex2 = Offset(outerX, height);
+      bezierEnd2 = Offset(outerX, height);
+      touchToCornerDistance = (adjustedTouch.dx - corner.dx).abs();
+      backTransform = _buildSideBackTransform(innerX);
+      isRightTopOrLeftBottom = forward;
+      return;
+    }
+    isRightTopOrLeftBottom =
+        (corner.dx == 0 && corner.dy == height) ||
+        (corner.dx == width && corner.dy == 0);
+
+    var touchX = _avoidEqual(touch.dx, corner.dx);
+    var touchY = _avoidEqual(touch.dy, corner.dy);
+    var points = _calculatePointsForTouch(Offset(touchX, touchY));
+
+    if (touchX > 0 && touchX < width) {
+      final start1X = points.start1.dx;
+      if (start1X < 0 || start1X > width) {
+        final normalizedStartX = start1X < 0 ? width - start1X : start1X;
+        final f1 = (corner.dx - touchX).abs();
+        if (f1 > 0.1 && normalizedStartX.abs() > 0.1) {
+          final f2 = width * f1 / normalizedStartX;
+          touchX = (corner.dx - f2).abs();
+          final f3 =
+              (corner.dx - touchX).abs() * (corner.dy - touchY).abs() / f1;
+          touchY = (corner.dy - f3).abs();
+          points = _calculatePointsForTouch(Offset(touchX, touchY));
+        }
+      }
+    }
+
+    adjustedTouch = Offset(touchX, touchY);
+    bezierControl1 = points.control1;
+    bezierControl2 = points.control2;
+    bezierStart1 = points.start1;
+    bezierStart2 = points.start2;
+    bezierEnd1 = _cross(
+      adjustedTouch,
+      bezierControl1,
+      bezierStart1,
+      bezierStart2,
+    );
+    bezierEnd2 = _cross(
+      adjustedTouch,
+      bezierControl2,
+      bezierStart1,
+      bezierStart2,
+    );
+    bezierVertex1 = Offset(
+      (bezierStart1.dx + 2 * bezierControl1.dx + bezierEnd1.dx) / 4,
+      (2 * bezierControl1.dy + bezierStart1.dy + bezierEnd1.dy) / 4,
+    );
+    bezierVertex2 = Offset(
+      (bezierStart2.dx + 2 * bezierControl2.dx + bezierEnd2.dx) / 4,
+      (2 * bezierControl2.dy + bezierStart2.dy + bezierEnd2.dy) / 4,
+    );
+    touchToCornerDistance = (adjustedTouch - corner).distance;
+    backTransform = _buildBackTransform();
+  }
+
+  _FoldPoints _calculatePointsForTouch(Offset point) {
+    final middleX = (point.dx + corner.dx) / 2;
+    final middleY = (point.dy + corner.dy) / 2;
+    final cornerToMiddleX = _avoidZero(corner.dx - middleX);
+    final cornerToMiddleY = corner.dy - middleY;
+    final control1 = Offset(
+      middleX - cornerToMiddleY * cornerToMiddleY / cornerToMiddleX,
+      corner.dy,
+    );
+    final control2 = Offset(
+      corner.dx,
+      middleY -
+          (corner.dx - middleX) *
+              (corner.dx - middleX) /
+              _avoidZero(corner.dy - middleY),
+    );
+    return _FoldPoints(
+      control1: control1,
+      control2: control2,
+      start1: Offset(control1.dx - (corner.dx - control1.dx) / 2, corner.dy),
+      start2: Offset(corner.dx, control2.dy - (corner.dy - control2.dy) / 2),
+    );
+  }
+
+  Matrix4 _buildBackTransform() {
+    final dis = math.sqrt(
+      math.pow(corner.dx - bezierControl1.dx, 2) +
+          math.pow(bezierControl2.dy - corner.dy, 2),
+    );
+    if (dis <= 0.1) return Matrix4.identity();
+    final f8 = (corner.dx - bezierControl1.dx) / dis;
+    final f9 = (bezierControl2.dy - corner.dy) / dis;
+    final a = 1 - 2 * f9 * f9;
+    final b = 2 * f8 * f9;
+    final d = 1 - 2 * f8 * f8;
+    return Matrix4.identity()
+      ..setEntry(0, 0, a)
+      ..setEntry(0, 1, b)
+      ..setEntry(
+        0,
+        3,
+        bezierControl1.dx - a * bezierControl1.dx - b * bezierControl1.dy,
+      )
+      ..setEntry(1, 0, b)
+      ..setEntry(1, 1, d)
+      ..setEntry(
+        1,
+        3,
+        bezierControl1.dy - b * bezierControl1.dx - d * bezierControl1.dy,
+      );
+  }
+
+  double get sideFoldWidth => math.max(16.0, math.min(56.0, size.width * 0.08));
+
+  Matrix4 _buildSideBackTransform(double x) {
+    return Matrix4.identity()
+      ..setEntry(0, 0, -1)
+      ..setEntry(0, 3, 2 * x);
+  }
+
+  static Offset _cross(Offset p1, Offset p2, Offset p3, Offset p4) {
+    final a1 = (p2.dy - p1.dy) / _avoidZero(p2.dx - p1.dx);
+    final b1 = p1.dy - a1 * p1.dx;
+    final a2 = (p4.dy - p3.dy) / _avoidZero(p4.dx - p3.dx);
+    final b2 = p3.dy - a2 * p3.dx;
+    final x = (b2 - b1) / _avoidZero(a1 - a2);
+    final y = a1 * x + b1;
+    if (x.isFinite && y.isFinite) return Offset(x, y);
+    return p1;
+  }
+
+  static double _avoidEqual(double value, double target) {
+    if ((value - target).abs() > 0.1) return value;
+    return value < target ? target - 0.1 : target + 0.1;
+  }
+
+  static double _avoidZero(double value) {
+    if (value.abs() > 0.1) return value;
+    return value.isNegative ? -0.1 : 0.1;
+  }
 }
 
-class _FoldHighlightPainter extends CustomPainter {
-  const _FoldHighlightPainter({
+class _FoldPoints {
+  const _FoldPoints({
+    required this.control1,
+    required this.control2,
+    required this.start1,
+    required this.start2,
+  });
+
+  final Offset control1;
+  final Offset control2;
+  final Offset start1;
+  final Offset start2;
+}
+
+class _CurrentPageClipper extends CustomClipper<Path> {
+  const _CurrentPageClipper(this.geometry);
+
+  final _FoldGeometry geometry;
+
+  @override
+  Path getClip(Size size) => geometry.currentPagePath;
+
+  @override
+  bool shouldReclip(covariant _CurrentPageClipper oldClipper) =>
+      oldClipper.geometry != geometry;
+}
+
+class _NextPageClipper extends CustomClipper<Path> {
+  const _NextPageClipper(this.geometry);
+
+  final _FoldGeometry geometry;
+
+  @override
+  Path getClip(Size size) => geometry.nextPagePath;
+
+  @override
+  bool shouldReclip(covariant _NextPageClipper oldClipper) =>
+      oldClipper.geometry != geometry;
+}
+
+class _FoldBackClipper extends CustomClipper<Path> {
+  const _FoldBackClipper(this.geometry);
+
+  final _FoldGeometry geometry;
+
+  @override
+  Path getClip(Size size) => geometry.backVisiblePath;
+
+  @override
+  bool shouldReclip(covariant _FoldBackClipper oldClipper) =>
+      oldClipper.geometry != geometry;
+}
+
+class _UnderPageShadowPainter extends CustomPainter {
+  const _UnderPageShadowPainter({
     required this.geometry,
     required this.shadowColor,
-    required this.highlightColor,
   });
 
   final _FoldGeometry geometry;
   final Color shadowColor;
-  final Color highlightColor;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (geometry.progress <= 0) return;
-
-    final edgeRect = geometry.forward
-        ? Rect.fromLTWH(geometry.foldX, 0, 15, size.height)
-        : Rect.fromLTWH(geometry.foldX - 15, 0, 15, size.height);
-    final edgeHighlightPaint = Paint()
-      ..shader = LinearGradient(
-        begin: geometry.forward ? Alignment.centerLeft : Alignment.centerRight,
-        end: geometry.forward ? Alignment.centerRight : Alignment.centerLeft,
-        colors: [
-          highlightColor.withOpacity(0.9),
-          highlightColor.withOpacity(0.0),
-        ],
-      ).createShader(edgeRect);
-    canvas.drawRect(edgeRect, edgeHighlightPaint);
-
-    final foldRect = geometry.forward
-        ? Rect.fromLTWH(geometry.foldX, 0, geometry.depth, size.height)
+    if (geometry.fromSide) {
+      _paintSideShadow(canvas, size);
+      return;
+    }
+    canvas.save();
+    canvas.clipPath(geometry.nextPagePath);
+    canvas.translate(geometry.bezierStart1.dx, geometry.bezierStart1.dy);
+    canvas.rotate(geometry.shadowAngle);
+    canvas.translate(-geometry.bezierStart1.dx, -geometry.bezierStart1.dy);
+    final extent = geometry.foldShadowExtent;
+    final rect = geometry.isRightTopOrLeftBottom
+        ? Rect.fromLTWH(
+            geometry.bezierStart1.dx,
+            geometry.bezierStart1.dy,
+            extent,
+            geometry.maxLength,
+          )
         : Rect.fromLTWH(
-            geometry.foldX - geometry.depth,
-            0,
-            geometry.depth,
-            size.height,
+            geometry.bezierStart1.dx - extent,
+            geometry.bezierStart1.dy,
+            extent,
+            geometry.maxLength,
           );
-    final foldShadePaint = Paint()
+    final paint = Paint()
       ..shader = LinearGradient(
-        begin: geometry.forward ? Alignment.centerLeft : Alignment.centerRight,
-        end: geometry.forward ? Alignment.centerRight : Alignment.centerLeft,
+        begin: geometry.isRightTopOrLeftBottom
+            ? Alignment.centerLeft
+            : Alignment.centerRight,
+        end: geometry.isRightTopOrLeftBottom
+            ? Alignment.centerRight
+            : Alignment.centerLeft,
         colors: [
-          highlightColor.withOpacity(0.7 * geometry.progress),
-          shadowColor.withOpacity(0.06 * geometry.progress),
+          _alpha(shadowColor, 0.34 * geometry.progress),
+          _alpha(shadowColor, 0.10 * geometry.progress),
+          _alpha(shadowColor, 0),
         ],
-      ).createShader(foldRect);
-    canvas.drawRect(foldRect, foldShadePaint);
+      ).createShader(rect);
+    canvas.drawRect(rect, paint);
+    canvas.restore();
+  }
+
+  void _paintSideShadow(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.clipPath(geometry.nextPagePath);
+    final width = math.max(28.0, math.min(76.0, size.width * 0.12));
+    final rect = geometry.forward
+        ? Rect.fromLTWH(
+            math.max(0.0, geometry.adjustedTouch.dx - width),
+            0,
+            width,
+            size.height,
+          )
+        : Rect.fromLTWH(geometry.adjustedTouch.dx, 0, width, size.height);
+    final paint = Paint()
+      ..shader = LinearGradient(
+        begin: geometry.forward ? Alignment.centerRight : Alignment.centerLeft,
+        end: geometry.forward ? Alignment.centerLeft : Alignment.centerRight,
+        colors: [
+          _alpha(shadowColor, 0.30 * geometry.progress),
+          _alpha(shadowColor, 0.11 * geometry.progress),
+          _alpha(shadowColor, 0),
+        ],
+      ).createShader(rect);
+    canvas.drawRect(rect, paint);
+    canvas.restore();
   }
 
   @override
-  bool shouldRepaint(covariant _FoldHighlightPainter oldDelegate) =>
+  bool shouldRepaint(covariant _UnderPageShadowPainter oldDelegate) =>
       oldDelegate.geometry != geometry ||
-      oldDelegate.shadowColor != shadowColor ||
-      oldDelegate.highlightColor != highlightColor;
+      oldDelegate.shadowColor != shadowColor;
 }
 
 double _lerp(num a, num b, double t) => a + (b - a) * t;
+
+Color _alpha(Color color, double alpha) =>
+    color.withValues(alpha: alpha.clamp(0.0, 1.0));
