@@ -77,11 +77,24 @@ class _HorizontalReadPageState extends State<HorizontalReadPage>
   int index = 0; //HorizontalReadPage内部的页面，与PageController的页面无关
 
   late String _lastLayoutSig;
+  int _layoutGeneration = 0;
 
   int get _safePageCount => _pageCount() <= 0 ? 0 : _pageCount() - 1;
 
   int _clampPageIndex(int value) =>
       (value.clamp(0, _safePageCount) as num).toInt();
+
+  int _pageCountForLength(int pageLength) {
+    if (widget.isDualPage) {
+      return (pageLength / 2).ceil();
+    }
+    return pageLength;
+  }
+
+  int _clampPageIndexForCount(int value, int pageCount) {
+    if (pageCount <= 0) return 0;
+    return (value.clamp(0, pageCount - 1) as num).toInt();
+  }
 
   @override
   void initState() {
@@ -116,6 +129,7 @@ class _HorizontalReadPageState extends State<HorizontalReadPage>
   }
 
   void resetPage() {
+    final generation = ++_layoutGeneration;
     text = widget.text;
     textStyle = widget.style;
     images = List<String>.from(widget.images); //转换为纯净的List<String>
@@ -133,10 +147,10 @@ class _HorizontalReadPageState extends State<HorizontalReadPage>
       });
       return;
     }
-    initPage();
-    index = _clampPageIndex(index);
+    initPage(generation, index);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || generation != _layoutGeneration) return;
       widget.onPageChanged(index, _pageCount()); //页面加载完成时，提醒保存进度
     });
   }
@@ -145,19 +159,24 @@ class _HorizontalReadPageState extends State<HorizontalReadPage>
   void didUpdateWidget(covariant HorizontalReadPage oldWidget) {
     super.didUpdateWidget(oldWidget);
 
+    final contentChanged =
+        widget.text != oldWidget.text ||
+        !listEquals(widget.images, oldWidget.images);
+    final newSig = _layoutSignature();
+    if (contentChanged) {
+      _lastLayoutSig = newSig;
+      index = widget.initIndex;
+      setState(() {
+        pages = [];
+      });
+      resetPage();
+      return;
+    }
+
     //这里比较排版几何参数（fontSize, textStyle）是否有变化
     //这里不能使用"widget.xxx != oldWidget.xxx"，这是在比较对象，而不是比较其中的参数。比如深浅模式切换导致页面重建，会重建TextStyle对象实例，最终误判
-    final newSig = _layoutSignature();
     if (newSig != _lastLayoutSig) {
       _lastLayoutSig = newSig;
-      if (widget.text != oldWidget.text &&
-          listEquals(widget.images, oldWidget.images)) {
-        //判断章节是否切换
-        index = 0;
-        setState(() {
-          pages = [];
-        });
-      }
       resetPage();
       return;
     }
@@ -188,17 +207,12 @@ class _HorizontalReadPageState extends State<HorizontalReadPage>
   Widget build(BuildContext context) {
     if (widget.pageTurningAnimation) {
       final currentIndex = _clampPageIndex(index);
-      return PaperCurlPager(
+      return PaperCurlPager.builder(
         controller: widget.paperCurlController,
-        pages: List<Widget>.generate(
-          _pageCount(),
-          (i) => RepaintBoundary(child: _buildPage(i)),
-        ),
+        pageCount: _pageCount(),
+        pageBuilder: (_, i) => RepaintBoundary(child: _buildPage(i)),
         initialIndex: currentIndex,
-        interactivePageIndices: {
-          for (var i = 0; i < _pageCount(); i++)
-            if (_spreadContainsImage(i)) i,
-        },
+        isPageInteractive: _spreadContainsImage,
         reverse: widget.reverse,
         animationEnabled: true,
         backgroundColor:
@@ -462,7 +476,7 @@ class _HorizontalReadPageState extends State<HorizontalReadPage>
     );
   }
 
-  void initPage() async {
+  void initPage(int generation, int targetIndex) async {
     double fontSize = textStyle.fontSize!;
     double lineHeight = textStyle.height!;
 
@@ -513,12 +527,20 @@ class _HorizontalReadPageState extends State<HorizontalReadPage>
       ),
     );
 
+    if (!mounted || generation != _layoutGeneration) return;
+
     this.pages = pages;
+    index = _clampPageIndexForCount(
+      targetIndex,
+      _pageCountForLength(pages.length),
+    );
     widget.onPageChanged(index, _pageCount());
 
     setState(() {}); //刷新UI
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || generation != _layoutGeneration) return;
+      if (_pageCount() <= 0) return;
       final target =
           (index.clamp(0, _pageCount() <= 0 ? 0 : _pageCount() - 1) as num)
               .toInt();
@@ -716,8 +738,6 @@ class _HorizontalReadPageState extends State<HorizontalReadPage>
     final size = _currentViewSize();
 
     return [
-      widget.text.length,
-      widget.images.length,
       widget.isDualPage,
       widget.dualPageSpacing,
       size.width,

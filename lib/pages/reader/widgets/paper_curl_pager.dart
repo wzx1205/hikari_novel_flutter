@@ -21,12 +21,13 @@ class PaperCurlPagerController {
 }
 
 class PaperCurlPager extends StatefulWidget {
-  const PaperCurlPager({
+  const PaperCurlPager.builder({
     super.key,
     this.controller,
-    required this.pages,
+    required this.pageCount,
+    required this.pageBuilder,
     required this.initialIndex,
-    this.interactivePageIndices = const <int>{},
+    this.isPageInteractive,
     this.reverse = false,
     this.duration = const Duration(milliseconds: 520),
     this.animationEnabled = true,
@@ -37,12 +38,13 @@ class PaperCurlPager extends StatefulWidget {
     this.onReachStart,
     this.onReachEnd,
     this.edgeTapWidthFactor = 0.28,
-  });
+  }) : assert(pageCount >= 0);
 
   final PaperCurlPagerController? controller;
-  final List<Widget> pages;
+  final int pageCount;
+  final IndexedWidgetBuilder pageBuilder;
   final int initialIndex;
-  final Set<int> interactivePageIndices;
+  final bool Function(int index)? isPageInteractive;
   final bool reverse;
   final Duration duration;
   final bool animationEnabled;
@@ -78,16 +80,16 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
   double _dragDelta = 0;
   Curve _releaseCurve = Curves.easeInOutCubic;
 
-  int get _lastIndex => widget.pages.isEmpty ? 0 : widget.pages.length - 1;
+  int get _lastIndex => widget.pageCount <= 0 ? 0 : widget.pageCount - 1;
 
   bool get _currentPageInteractive =>
-      widget.interactivePageIndices.contains(_index);
+      widget.isPageInteractive?.call(_index) ?? false;
 
   bool get _canGoForward =>
-      widget.pages.isNotEmpty && _targetForDirection(true) != _index;
+      widget.pageCount > 0 && _targetForDirection(true) != _index;
 
   bool get _canGoBackward =>
-      widget.pages.isNotEmpty && _targetForDirection(false) != _index;
+      widget.pageCount > 0 && _targetForDirection(false) != _index;
 
   @override
   void initState() {
@@ -112,7 +114,7 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
     }
     final safeInitial = _safeIndex(widget.initialIndex);
     final shouldReset =
-        widget.pages.length != oldWidget.pages.length || safeInitial != _index;
+        widget.pageCount != oldWidget.pageCount || safeInitial != _index;
     if (!_isDragging && !_isAnimating && shouldReset) {
       _index = safeInitial;
       _resetGestureState(notify: false);
@@ -131,12 +133,12 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
       : const Duration(milliseconds: 1);
 
   int _safeIndex(int raw) {
-    if (widget.pages.isEmpty) return 0;
-    return raw.clamp(0, widget.pages.length - 1);
+    if (widget.pageCount <= 0) return 0;
+    return raw.clamp(0, widget.pageCount - 1);
   }
 
   int _targetForDirection(bool forward) {
-    if (widget.pages.isEmpty) return 0;
+    if (widget.pageCount <= 0) return 0;
     final delta = _nextForOpening(forward) ? 1 : -1;
     return (_index + delta).clamp(0, _lastIndex);
   }
@@ -331,7 +333,7 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
   }
 
   void _handlePanUpdate(DragUpdateDetails details) {
-    if (widget.pages.isEmpty || _size.width <= 0 || _size.height <= 0) {
+    if (widget.pageCount <= 0 || _size.width <= 0 || _size.height <= 0) {
       return;
     }
     final localPos = _logicalOffset(details.localPosition);
@@ -374,17 +376,20 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
     );
   }
 
-  Widget _pageAt(int index) {
-    if (widget.pages.isEmpty || index < 0 || index >= widget.pages.length) {
+  Widget _pageAt(int index, Map<int, Widget> pageCache) {
+    if (widget.pageCount <= 0 || index < 0 || index >= widget.pageCount) {
       return const SizedBox.shrink();
     }
     final background =
         widget.backgroundColor ?? Theme.of(context).colorScheme.surface;
-    Widget page = ColoredBox(
-      color: background,
-      child: SizedBox.expand(child: widget.pages[index]),
+    final page = pageCache.putIfAbsent(
+      index,
+      () => widget.pageBuilder(context, index),
     );
-    return page;
+    return ColoredBox(
+      color: background,
+      child: SizedBox.expand(child: page),
+    );
   }
 
   @override
@@ -405,6 +410,7 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
             (_isDragging || _isAnimating) &&
             _targetIndex != null &&
             _progress > 0.0001;
+        final pageCache = <int, Widget>{};
         final underIndex = showTurn ? _targetIndex! : _index;
         final fold = _FoldGeometry.fromDrag(
           size: _size,
@@ -431,10 +437,10 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
                   if (showTurn)
                     ClipPath(
                       clipper: _NextPageClipper(fold),
-                      child: _pageAt(underIndex),
+                      child: _pageAt(underIndex, pageCache),
                     )
                   else
-                    _pageAt(underIndex),
+                    _pageAt(underIndex, pageCache),
                   if (showTurn)
                     CustomPaint(
                       painter: _UnderPageShadowPainter(
@@ -450,10 +456,10 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
                   if (showTurn)
                     ClipPath(
                       clipper: _CurrentPageClipper(fold),
-                      child: _pageAt(_index),
+                      child: _pageAt(_index, pageCache),
                     )
                   else
-                    _pageAt(_index),
+                    _pageAt(_index, pageCache),
                   if (showTurn)
                     IgnorePointer(
                       child: ClipPath(
@@ -464,7 +470,7 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
                             Transform(
                               transform: fold.backTransform,
                               filterQuality: FilterQuality.low,
-                              child: _pageAt(_index),
+                              child: _pageAt(_index, pageCache),
                             ),
                             ColoredBox(
                               color: _alpha(
