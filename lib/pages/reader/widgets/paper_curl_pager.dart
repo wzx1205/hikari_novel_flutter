@@ -80,10 +80,6 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
 
   int get _lastIndex => widget.pages.isEmpty ? 0 : widget.pages.length - 1;
 
-  int get _forwardDelta => widget.reverse ? -1 : 1;
-
-  int get _backwardDelta => -_forwardDelta;
-
   bool get _currentPageInteractive =>
       widget.interactivePageIndices.contains(_index);
 
@@ -141,9 +137,20 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
 
   int _targetForDirection(bool forward) {
     if (widget.pages.isEmpty) return 0;
-    final delta = forward ? _forwardDelta : _backwardDelta;
+    final delta = _nextForOpening(forward) ? 1 : -1;
     return (_index + delta).clamp(0, _lastIndex);
   }
+
+  void _notifyReachedBoundary(bool forward) {
+    if (_nextForOpening(forward)) {
+      widget.onReachEnd?.call();
+    } else {
+      widget.onReachStart?.call();
+    }
+  }
+
+  bool _nextForOpening(bool opensFromRight) =>
+      widget.reverse ? !opensFromRight : opensFromRight;
 
   void _jumpToExternal(int target) {
     final safeTarget = _safeIndex(target);
@@ -206,11 +213,7 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
   }
 
   Offset _logicalOffset(Offset physical) {
-    if (!widget.reverse || _size.width <= 0) return physical;
-    return Offset(
-      (_size.width - physical.dx).clamp(0.0, _size.width),
-      physical.dy,
-    );
+    return physical;
   }
 
   void _startGesture({required bool forward, required Offset localPos}) {
@@ -243,7 +246,9 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
 
   Offset _releaseTarget(bool complete) {
     final targetX = complete
-        ? (_turningForward ? -_size.width * 0.16 : _size.width * 1.16)
+        ? (_fromSide
+              ? (_turningForward ? -_size.width : _size.width * 2)
+              : (_turningForward ? -_size.width * 0.16 : _size.width * 1.16))
         : _downPos.dx;
     final targetY = complete
         ? (_fromSide
@@ -288,21 +293,25 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
     final right = _size.width * (1 - widget.edgeTapWidthFactor);
     final fromTop = pos.dy <= (_size.height / 2);
     if (pos.dx <= left) {
-      if (!_canGoBackward) {
-        widget.onReachStart?.call();
+      final opensFromRight = widget.reverse;
+      if ((opensFromRight && !_canGoForward) ||
+          (!opensFromRight && !_canGoBackward)) {
+        _notifyReachedBoundary(opensFromRight);
       } else {
         setState(() {
-          _animateTapTurn(false, fromTop: fromTop);
+          _animateTapTurn(opensFromRight, fromTop: fromTop);
         });
       }
       return;
     }
     if (pos.dx >= right) {
-      if (!_canGoForward) {
-        widget.onReachEnd?.call();
+      final opensFromRight = !widget.reverse;
+      if ((opensFromRight && !_canGoForward) ||
+          (!opensFromRight && !_canGoBackward)) {
+        _notifyReachedBoundary(opensFromRight);
       } else {
         setState(() {
-          _animateTapTurn(true, fromTop: fromTop);
+          _animateTapTurn(opensFromRight, fromTop: fromTop);
         });
       }
       return;
@@ -333,11 +342,11 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
       }
       final forward = delta.dx < 0;
       if (forward && !_canGoForward) {
-        widget.onReachEnd?.call();
+        _notifyReachedBoundary(true);
         return;
       }
       if (!forward && !_canGoBackward) {
-        widget.onReachStart?.call();
+        _notifyReachedBoundary(false);
         return;
       }
       setState(() {
@@ -354,9 +363,8 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
   void _handlePanEnd(DragEndDetails details) {
     if (!_isDragging) return;
     final velocity = details.velocity.pixelsPerSecond.dx;
-    final logicalVelocity = widget.reverse ? -velocity : velocity;
-    final flingForward = logicalVelocity < -500;
-    final flingBackward = logicalVelocity > 500;
+    final flingForward = velocity < -500;
+    final flingBackward = velocity > 500;
     final shouldComplete = _turningForward
         ? (_progress > 0.2 || (_progress > 0.05 && flingForward))
         : (_progress > 0.2 || (_progress > 0.05 && flingBackward));
@@ -376,13 +384,6 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
       color: background,
       child: SizedBox.expand(child: widget.pages[index]),
     );
-    if (widget.reverse) {
-      page = Transform(
-        alignment: Alignment.center,
-        transform: Matrix4.diagonal3Values(-1, 1, 1),
-        child: page,
-      );
-    }
     return page;
   }
 
@@ -513,13 +514,6 @@ class _PaperCurlPagerState extends State<PaperCurlPager>
           ),
         );
 
-        if (widget.reverse) {
-          child = Transform(
-            alignment: Alignment.center,
-            transform: Matrix4.diagonal3Values(-1, 1, 1),
-            child: child,
-          );
-        }
         return child;
       },
     );
@@ -580,7 +574,7 @@ class _FoldGeometry {
       fromTop: fromTop,
       fromSide: fromSide,
       touch: Offset(
-        dragPos.dx.clamp(-safeWidth * 0.25, safeWidth * 1.25).toDouble(),
+        dragPos.dx.clamp(-safeWidth, safeWidth * 2).toDouble(),
         safeTouchY,
       ),
       corner: Offset(
@@ -600,15 +594,7 @@ class _FoldGeometry {
 
   Path get turnedPagePath {
     if (fromSide) {
-      final outerX = forward
-          ? math.min(size.width, adjustedTouch.dx + sideFoldWidth)
-          : math.max(0.0, adjustedTouch.dx - sideFoldWidth);
-      return Path()
-        ..moveTo(adjustedTouch.dx, 0)
-        ..lineTo(adjustedTouch.dx, size.height)
-        ..lineTo(outerX, size.height)
-        ..lineTo(outerX, 0)
-        ..close();
+      return _sideFoldBackPath;
     }
     return Path()
       ..moveTo(bezierStart1.dx, bezierStart1.dy)
@@ -631,6 +617,14 @@ class _FoldGeometry {
   }
 
   Path get currentPagePath {
+    if (fromSide) {
+      final creaseX = _sideCreaseX;
+      if (forward) {
+        return Path()..addRect(Rect.fromLTWH(0, 0, creaseX, size.height));
+      }
+      return Path()
+        ..addRect(Rect.fromLTWH(creaseX, 0, size.width - creaseX, size.height));
+    }
     return Path.combine(
       PathOperation.difference,
       Path()..addRect(Offset.zero & size),
@@ -640,18 +634,13 @@ class _FoldGeometry {
 
   Path get nextPagePath {
     if (fromSide) {
+      final creaseX = _sideCreaseX;
       if (forward) {
-        return Path()
-          ..addRect(Rect.fromLTWH(0, 0, adjustedTouch.dx, size.height));
+        return Path()..addRect(
+          Rect.fromLTWH(creaseX, 0, size.width - creaseX, size.height),
+        );
       }
-      return Path()..addRect(
-        Rect.fromLTWH(
-          adjustedTouch.dx,
-          0,
-          size.width - adjustedTouch.dx,
-          size.height,
-        ),
-      );
+      return Path()..addRect(Rect.fromLTWH(0, 0, creaseX, size.height));
     }
     return Path()
       ..moveTo(bezierStart1.dx, bezierStart1.dy)
@@ -663,7 +652,7 @@ class _FoldGeometry {
   }
 
   Path get backPath {
-    if (fromSide) return turnedPagePath;
+    if (fromSide) return _sideFoldBackPath;
     return Path()
       ..moveTo(bezierVertex2.dx, bezierVertex2.dy)
       ..lineTo(bezierVertex1.dx, bezierVertex1.dy)
@@ -674,7 +663,7 @@ class _FoldGeometry {
   }
 
   Path get backVisiblePath {
-    if (fromSide) return turnedPagePath;
+    if (fromSide) return _sideFoldBackPath;
     return Path.combine(PathOperation.intersect, turnedPagePath, backPath);
   }
 
@@ -683,23 +672,22 @@ class _FoldGeometry {
     final height = math.max(1.0, size.height);
     if (fromSide) {
       adjustedTouch = Offset(
-        touch.dx.clamp(0.0, width),
+        touch.dx.clamp(-width, width * 2),
         touch.dy.clamp(0.1, math.max(0.1, height - 0.1)),
       );
-      final innerX = adjustedTouch.dx;
-      final outerX = forward
-          ? math.min(width, innerX + sideFoldWidth)
-          : math.max(0.0, innerX - sideFoldWidth);
-      bezierStart1 = Offset(innerX, 0);
-      bezierControl1 = Offset(innerX, 0);
-      bezierVertex1 = Offset(outerX, 0);
-      bezierEnd1 = Offset(outerX, 0);
-      bezierStart2 = Offset(innerX, height);
-      bezierControl2 = Offset(innerX, height);
-      bezierVertex2 = Offset(outerX, height);
-      bezierEnd2 = Offset(outerX, height);
-      touchToCornerDistance = (adjustedTouch.dx - corner.dx).abs();
-      backTransform = _buildSideBackTransform(innerX);
+      final creaseX = _sideCreaseX;
+      final visibleTouchX = _sideVisibleTouchX;
+      final edgeX = forward ? width : 0.0;
+      bezierStart1 = Offset(creaseX, 0);
+      bezierControl1 = Offset(creaseX, 0);
+      bezierVertex1 = Offset(edgeX, 0);
+      bezierEnd1 = Offset(visibleTouchX, 0);
+      bezierStart2 = Offset(creaseX, height);
+      bezierControl2 = Offset(creaseX, height);
+      bezierVertex2 = Offset(edgeX, height);
+      bezierEnd2 = Offset(visibleTouchX, height);
+      touchToCornerDistance = (adjustedTouch.dx - edgeX).abs();
+      backTransform = _buildSideBackTransform(creaseX);
       isRightTopOrLeftBottom = forward;
       return;
     }
@@ -808,7 +796,22 @@ class _FoldGeometry {
       );
   }
 
-  double get sideFoldWidth => math.max(16.0, math.min(56.0, size.width * 0.08));
+  double get _sideCreaseX {
+    final edgeX = forward ? size.width : 0.0;
+    return ((adjustedTouch.dx + edgeX) / 2).clamp(0.0, size.width).toDouble();
+  }
+
+  double get _sideVisibleTouchX {
+    return adjustedTouch.dx.clamp(0.0, size.width).toDouble();
+  }
+
+  Path get _sideFoldBackPath {
+    final creaseX = _sideCreaseX;
+    final touchX = _sideVisibleTouchX;
+    final left = math.min(creaseX, touchX);
+    final width = (creaseX - touchX).abs();
+    return Path()..addRect(Rect.fromLTWH(left, 0, width, size.height));
+  }
 
   Matrix4 _buildSideBackTransform(double x) {
     return Matrix4.identity()
@@ -948,18 +951,14 @@ class _UnderPageShadowPainter extends CustomPainter {
     canvas.save();
     canvas.clipPath(geometry.nextPagePath);
     final width = math.max(28.0, math.min(76.0, size.width * 0.12));
+    final creaseX = geometry.bezierStart1.dx;
     final rect = geometry.forward
-        ? Rect.fromLTWH(
-            math.max(0.0, geometry.adjustedTouch.dx - width),
-            0,
-            width,
-            size.height,
-          )
-        : Rect.fromLTWH(geometry.adjustedTouch.dx, 0, width, size.height);
+        ? Rect.fromLTWH(creaseX, 0, width, size.height)
+        : Rect.fromLTWH(math.max(0.0, creaseX - width), 0, width, size.height);
     final paint = Paint()
       ..shader = LinearGradient(
-        begin: geometry.forward ? Alignment.centerRight : Alignment.centerLeft,
-        end: geometry.forward ? Alignment.centerLeft : Alignment.centerRight,
+        begin: geometry.forward ? Alignment.centerLeft : Alignment.centerRight,
+        end: geometry.forward ? Alignment.centerRight : Alignment.centerLeft,
         colors: [
           _alpha(shadowColor, 0.30 * geometry.progress),
           _alpha(shadowColor, 0.11 * geometry.progress),
