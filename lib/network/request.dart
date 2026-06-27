@@ -106,7 +106,12 @@ class Request {
     if (response.statusCode != null && response.statusCode! >= 300 && response.statusCode! < 400) {
       final location = response.headers.value('location');
       if (location != null) {
-        final redirectedResponse = await dio.get("${Api.wenku8Node.node}/$location");
+        // location 可能是绝对 URL (如 "https://www.wenku8.net/") 也可能是相对路径 (如 "/login.php?...")
+        // 直接拼接当且仅当 location 是相对路径时有效
+        final redirectUrl = location.startsWith('http')
+            ? location
+            : Uri.parse(response.requestOptions.path).resolve(location).toString();
+        final redirectedResponse = await dio.get(redirectUrl);
         return redirectedResponse.data;
       }
     }

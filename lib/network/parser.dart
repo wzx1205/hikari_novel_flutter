@@ -432,15 +432,32 @@ class Parser {
 
   static UserInfo getUserInfo(String html) {
     Document document = parse(html);
-    Element content = document.getElementById('content')!;
-    Element tbody = content.querySelector('tbody')!;
+    Element? content = document.getElementById('content');
+    if (content == null) {
+      throw StateError('用户信息页结构异常：缺少 #content 元素（可能未登录或页面被重定向）');
+    }
+    Element? tbody = content.querySelector('tbody');
+    if (tbody == null) {
+      throw StateError('用户信息页结构异常：表格主体不存在，可能是未登录或页面被重定向到登录页');
+    }
     List<Element> rows = tbody.querySelectorAll('tr');
+    if (rows.length < 20) {
+      throw StateError('用户信息表格行数不足 (${rows.length})，预期至少 20 行；HTML 可能不是真正的用户详情页');
+    }
     Element row0 = rows[0];
-    String avatar = row0.querySelectorAll('td')[2].querySelector('img')!.attributes['src']!.replaceAll("https", "http");
+    final avatarImg = row0.querySelectorAll('td')[2].querySelector('img');
+    if (avatarImg == null || avatarImg.attributes['src'] == null) {
+      throw StateError('用户头像元素缺失，row0 第 3 个 td 内未找到 img[src]');
+    }
+    String avatar = avatarImg.attributes['src']!.replaceAll("https", "http");
     String userID = row0.querySelectorAll('td')[1].text.trim();
     String userName = rows[2].querySelectorAll('td')[1].text.trim();
     String userLevel = rows[4].querySelectorAll('td')[1].text.trim();
-    String email = rows[7].querySelector('a')!.text.trim();
+    final emailLink = rows[7].querySelector('a');
+    if (emailLink == null) {
+      throw StateError('Email 链接缺失，row7 内未找到 <a> 元素');
+    }
+    String email = emailLink.text.trim();
     String signUpDate = rows[12].querySelectorAll('td')[1].text.trim();
     String contribution = rows[13].querySelectorAll('td')[1].text.trim();
     String experience = rows[14].querySelectorAll('td')[1].text.trim();
