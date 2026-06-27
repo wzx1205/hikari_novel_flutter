@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -22,9 +25,9 @@ android {
     // 从 key.properties 读取签名信息（CI 通过 Secrets 注入，本地用 debug 签名回退）
     // 仅当 keystore 文件实际存在且非空时才使用 release 签名，避免 secret 缺失时构建崩溃
     val keyPropertiesFile = rootProject.file("android/key.properties")
-    val keyProperties = java.util.Properties()
+    val keyProperties = Properties()
     if (keyPropertiesFile.exists()) {
-        keyProperties.load(java.io.FileInputStream(keyPropertiesFile))
+        keyProperties.load(FileInputStream(keyPropertiesFile))
     }
     val keystoreFile = keyProperties["storeFile"]?.toString()?.let { file(it) }
     val hasValidKeystore = keystoreFile != null && keystoreFile.exists() && keystoreFile.length() > 0
