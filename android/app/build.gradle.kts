@@ -20,18 +20,21 @@ android {
     }
 
     // 从 key.properties 读取签名信息（CI 通过 Secrets 注入，本地用 debug 签名回退）
+    // 仅当 keystore 文件实际存在且非空时才使用 release 签名，避免 secret 缺失时构建崩溃
     val keyPropertiesFile = rootProject.file("android/key.properties")
     val keyProperties = java.util.Properties()
     if (keyPropertiesFile.exists()) {
         keyProperties.load(java.io.FileInputStream(keyPropertiesFile))
     }
+    val keystoreFile = keyProperties["storeFile"]?.toString()?.let { file(it) }
+    val hasValidKeystore = keystoreFile != null && keystoreFile.exists() && keystoreFile.length() > 0
 
     signingConfigs {
         create("release") {
-            if (keyProperties.isNotEmpty()) {
+            if (keyProperties.isNotEmpty() && hasValidKeystore) {
                 keyAlias = keyProperties["keyAlias"] as String
                 keyPassword = keyProperties["keyPassword"] as String
-                storeFile = file(keyProperties["storeFile"] as String)
+                storeFile = keystoreFile!!
                 storePassword = keyProperties["storePassword"] as String
             }
         }
@@ -50,8 +53,8 @@ android {
 
     buildTypes {
         release {
-            // 有关键签名信息时用固定签名，否则回退 debug（和旧版行为一致）
-            signingConfig = if (keyProperties.isNotEmpty()) {
+            // 有关键签名信息且 keystore 有效时用固定签名，否则回退 debug
+            signingConfig = if (hasValidKeystore) {
                 signingConfigs.getByName("release")
             } else {
                 signingConfigs.getByName("debug")
