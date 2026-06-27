@@ -19,6 +19,24 @@ android {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
+    // 从 key.properties 读取签名信息（CI 通过 Secrets 注入，本地用 debug 签名回退）
+    val keyPropertiesFile = rootProject.file("android/key.properties")
+    val keyProperties = java.util.Properties()
+    if (keyPropertiesFile.exists()) {
+        keyProperties.load(java.io.FileInputStream(keyPropertiesFile))
+    }
+
+    signingConfigs {
+        create("release") {
+            if (keyProperties.isNotEmpty()) {
+                keyAlias = keyProperties["keyAlias"] as String
+                keyPassword = keyProperties["keyPassword"] as String
+                storeFile = file(keyProperties["storeFile"] as String)
+                storePassword = keyProperties["storePassword"] as String
+            }
+        }
+    }
+
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "pers.cyh128.hikari_novel"
@@ -32,9 +50,12 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // 有关键签名信息时用固定签名，否则回退 debug（和旧版行为一致）
+            signingConfig = if (keyProperties.isNotEmpty()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }
