@@ -46,7 +46,7 @@ class LoginController extends GetxController {
     showLoading.value = false;
 
     //存储cookie
-    if (uri.toString().contains("wenku8") == true) {
+    if (uri.toString().contains("wenku8") == true || uri.toString().contains("zuohe233.work") == true) {
       final getCookie = await cookieManager.getCookies(url: uri);
 
       bool hasCookie = ["jieqiUserInfo", "jieqiVisitInfo"].every(

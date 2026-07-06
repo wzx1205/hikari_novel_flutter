@@ -3,6 +3,30 @@
 
 const UPSTREAM = "www.wenku8.net";
 
+// HTMLRewriter 处理器：替换元素属性中的 wenku8 域名
+class DomainRewriter {
+  constructor(proxyHost) {
+    this.proxyHost = proxyHost;
+  }
+
+  element(el) {
+    const rewritableAttrs = [
+      "action", "href", "src", "data-url",
+      "content", "onclick", "onload",
+    ];
+    for (const attr of rewritableAttrs) {
+      const value = el.getAttribute(attr);
+      if (value) {
+        let newVal = value.replace(/https?:\/\/www\.wenku8\.net/gi, "https://" + this.proxyHost);
+        newVal = newVal.replace(/www\.wenku8\.net/gi, this.proxyHost);
+        if (newVal !== value) {
+          el.setAttribute(attr, newVal);
+        }
+      }
+    }
+  }
+}
+
 export default {
   async fetch(request) {
     const proxyHost = new URL(request.url).host;
@@ -41,10 +65,11 @@ export default {
       const location = resp.headers.get("Location");
       if (location) {
         try {
+          const escapedUpstream = UPSTREAM.replace(/\./g, "\\.");
           let newLoc = location;
-          // 替换所有出现的 wenku8 上游域名
-          newLoc = newLoc.replace(new RegExp("//" + UPSTREAM, "gi"), "//" + proxyHost);
-          newLoc = newLoc.replace(new RegExp(UPSTREAM, "g"), proxyHost);
+          // 替换所有出现的 wenku8 上游域名（含协议前缀和裸域名）
+          newLoc = newLoc.replace(new RegExp("//" + escapedUpstream, "gi"), "//" + proxyHost);
+          newLoc = newLoc.replace(new RegExp(escapedUpstream, "g"), proxyHost);
           newResp.headers.set("Location", newLoc);
         } catch (e) {
           newResp.headers.set("Location", location);
@@ -62,8 +87,17 @@ export default {
       return newResp;
     }
 
-    // 正常响应
-    resp = new Response(resp.body, resp);
+    // 正常响应：用 HTMLRewriter 改写元素属性中的域名（不改编码）
+    const contentType = resp.headers.get("Content-Type") || "";
+    if (contentType.includes("text/html")) {
+      const rewriter = new HTMLRewriter()
+        .on("*", new DomainRewriter(proxyHost));
+      resp = rewriter.transform(resp);
+      // HTMLRewriter.transform 返回的是流式 Response，需要重新包装以添加 CORS 头
+      resp = new Response(resp.body, resp);
+    } else {
+      resp = new Response(resp.body, resp);
+    }
     resp.headers.set("Access-Control-Allow-Origin", "*");
     resp.headers.set("Access-Control-Allow-Methods", "GET, POST, HEAD, OPTIONS");
     resp.headers.set("Access-Control-Allow-Headers", "*");
