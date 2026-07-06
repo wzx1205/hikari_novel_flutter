@@ -1,11 +1,11 @@
 // Cloudflare Worker — wenku8 反向代理中继
-// 部署：Cloudflare Dashboard → Workers & Pages → Create → 粘贴此代码 → Deploy
-// 自定义域名：Worker → Settings → Triggers → Custom Domains 绑定子域
+// 部署：Cloudflare Dashboard → Workers & Pages → 粘贴此代码 → Deploy
 
 const UPSTREAM = "www.wenku8.net";
 
 export default {
   async fetch(request) {
+    const proxyHost = new URL(request.url).host;
     const url = new URL(request.url);
     url.protocol = "https:";
     url.host = UPSTREAM;
@@ -28,30 +28,31 @@ export default {
       method: request.method,
       headers: headers,
       body: ["GET", "HEAD"].includes(request.method) ? null : request.body,
-      redirect: "manual",  // 不跟随重定向，让 Set-Cookie 透传到客户端
+      redirect: "manual",
     });
 
     let resp = await fetch(req);
 
-    // 如果是重定向响应，改写 Location 到代理域名 + 剥离 Cookie 的 Domain 限制
+    // 重定向响应：改写 Location + 透传 Set-Cookie
     if ([301, 302, 303, 307, 308].includes(resp.status)) {
-      const location = resp.headers.get("Location");
-      const setCookies = resp.headers.getSetCookie ? resp.headers.getSetCookie() : [];
-
       const newResp = new Response(resp.body, resp);
 
-      // 改写 Location：把 wenku8.net → 代理域名
+      // 改写 Location
+      const location = resp.headers.get("Location");
       if (location) {
         try {
-          const locUrl = new URL(location);
-          if (locUrl.host === UPSTREAM) {
-            locUrl.host = new URL(request.url).host;
-            newResp.headers.set("Location", locUrl.toString());
-          }
-        } catch (e) { /* invalid URL, keep as-is */ }
+          let newLoc = location;
+          // 替换所有出现的 wenku8 上游域名
+          newLoc = newLoc.replace(new RegExp("//" + UPSTREAM, "gi"), "//" + proxyHost);
+          newLoc = newLoc.replace(new RegExp(UPSTREAM, "g"), proxyHost);
+          newResp.headers.set("Location", newLoc);
+        } catch (e) {
+          newResp.headers.set("Location", location);
+        }
       }
 
-      // 剥离 Set-Cookie 的 Domain 属性，让 cookie 绑定到代理域名
+      // 透传 Set-Cookie，剥离 Domain 限制
+      const setCookies = resp.headers.getSetCookie ? resp.headers.getSetCookie() : [];
       for (let raw of setCookies) {
         raw = raw.replace(/;\s*Domain=[^;]+/gi, "");
         raw = raw.replace(/;\s*SameSite=[^;]+/gi, "");
@@ -61,7 +62,7 @@ export default {
       return newResp;
     }
 
-    // 正常响应：透传
+    // 正常响应
     resp = new Response(resp.body, resp);
     resp.headers.set("Access-Control-Allow-Origin", "*");
     resp.headers.set("Access-Control-Allow-Methods", "GET, POST, HEAD, OPTIONS");
