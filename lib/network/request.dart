@@ -48,6 +48,7 @@ class Request {
 
     _dioCookieJar.saveFromResponse(Uri.parse(Wenku8Node.wwwWenku8Cc.node), cookies);
     _dioCookieJar.saveFromResponse(Uri.parse(Wenku8Node.wwwWenku8Net.node), cookies);
+    _dioCookieJar.saveFromResponse(Uri.parse(Wenku8Node.proxyWorker.node), cookies);
   }
 
   static void deleteCookie() => _dioCookieJar.deleteAll();

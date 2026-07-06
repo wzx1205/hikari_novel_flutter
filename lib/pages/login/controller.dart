@@ -42,52 +42,83 @@ class LoginController extends GetxController {
     cookieManager.deleteAllCookies();
   }
 
-  Future<void> saveCookie(WebUri uri) async {
+  Future<void> saveCookie(InAppWebViewController webController, WebUri uri) async {
     showLoading.value = false;
 
     //存储cookie
     if (uri.toString().contains("wenku8") == true || uri.toString().contains("zuohe233.work") == true) {
-      final getCookie = await cookieManager.getCookies(url: uri);
-
-      bool hasCookie = ["jieqiUserInfo", "jieqiVisitInfo"].every(
-        (keyword) => getCookie.any((cookieItem) => cookieItem.name.contains(keyword)),
-      ); //getCookie.any((cookieItem) => cookieItem.name == "jieqiUserInfo");
-      if (hasCookie) {
-        String cookie = "jieqiUserInfo=${getCookie.firstWhere((cookieItem) => cookieItem.name == "jieqiUserInfo").value};";
-        cookie += "jieqiVisitInfo=${getCookie.firstWhere((cookieItem) => cookieItem.name == "jieqiVisitInfo").value}";
-        // 保存 cf_clearance Cookie（Cloudflare 验证必需）
-        final cfClearance = getCookie.firstWhere(
-          (c) => c.name == "cf_clearance",
-          orElse: () => Cookie(name: "cf_clearance", value: ""),
+      // 使用 JS 从 WebView 内部读取 document.cookie，比 CookieManager API 更可靠
+      String cookiesJs;
+      try {
+        cookiesJs = (await webController.evaluateJavascript(source: "document.cookie")).toString();
+      } catch (_) {
+        // fallback to CookieManager API
+        final getCookie = await cookieManager.getCookies(url: uri);
+        final hasCookie = ["jieqiUserInfo", "jieqiVisitInfo"].every(
+          (keyword) => getCookie.any((cookieItem) => cookieItem.name.contains(keyword)),
         );
-        if (cfClearance.value.isNotEmpty) {
-          cookie += ";cf_clearance=${cfClearance.value}";
-        }
-        LocalStorageService.instance.setCookie(cookie);
-        Request.initCookie();
-
-        try {
-          await _getUserInfo();
-          await _refreshBookshelf();
-        } catch (e) {
-          LocalStorageService.instance.setCookie(null); //清空cookie
-          Request.deleteCookie();
-
-          final controller = inAppWebViewController;
-          if (controller != null) {
-            inAppWebViewController = null;
-            controller.dispose(); //销毁webview，停止加载网页
+        if (hasCookie) {
+          String cookie = "jieqiUserInfo=${getCookie.firstWhere((cookieItem) => cookieItem.name == "jieqiUserInfo").value};";
+          cookie += "jieqiVisitInfo=${getCookie.firstWhere((cookieItem) => cookieItem.name == "jieqiVisitInfo").value}";
+          final cfClearance = getCookie.firstWhere(
+            (c) => c.name == "cf_clearance",
+            orElse: () => Cookie(name: "cf_clearance", value: ""),
+          );
+          if (cfClearance.value.isNotEmpty) {
+            cookie += ";cf_clearance=${cfClearance.value}";
           }
-
-          errorMsg = e.toString();
-          pageState.value = PageState.error;
-
+          await _onLoginSuccess(cookie);
           return;
         }
+        return;
+      }
 
-        Get.offAllNamed(RoutePath.main);
+      // 从 document.cookie 字符串中解析所需 cookie
+      final cookieMap = <String, String>{};
+      for (final part in cookiesJs.split(';')) {
+        final trimmed = part.trim();
+        final eq = trimmed.indexOf('=');
+        if (eq > 0) {
+          cookieMap[trimmed.substring(0, eq)] = trimmed.substring(eq + 1);
+        }
+      }
+
+      final hasCookie = cookieMap.containsKey('jieqiUserInfo') && cookieMap.containsKey('jieqiVisitInfo');
+      if (hasCookie) {
+        String cookie = "jieqiUserInfo=${cookieMap['jieqiUserInfo']};";
+        cookie += "jieqiVisitInfo=${cookieMap['jieqiVisitInfo']}";
+        final cfClearance = cookieMap['cf_clearance'];
+        if (cfClearance != null && cfClearance.isNotEmpty) {
+          cookie += ";cf_clearance=$cfClearance";
+        }
+        await _onLoginSuccess(cookie);
       }
     }
+  }
+
+  Future<void> _onLoginSuccess(String cookie) async {
+    LocalStorageService.instance.setCookie(cookie);
+    Request.initCookie();
+
+    try {
+      await _getUserInfo();
+      await _refreshBookshelf();
+    } catch (e) {
+      LocalStorageService.instance.setCookie(null); //清空cookie
+      Request.deleteCookie();
+
+      final controller = inAppWebViewController;
+      if (controller != null) {
+        inAppWebViewController = null;
+        controller.dispose(); //销毁webview，停止加载网页
+      }
+
+      errorMsg = e.toString();
+      pageState.value = PageState.error;
+      return;
+    }
+
+    Get.offAllNamed(RoutePath.main);
   }
 
   Future<void> _getUserInfo() async {
