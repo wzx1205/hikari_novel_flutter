@@ -89,13 +89,13 @@ class SettingPage extends StatelessWidget {
           Obx(() {
             return NormalTile(
               title: "node".tr,
-              subtitle: controller.wenku8Node.value.node,
+              subtitle: controller.wenku8Node.value.label,
               leading: const Icon(Icons.lan_outlined),
               onTap: () =>
                   showRadioListSheet(
                     context,
                     value: controller.wenku8Node.value,
-                    values: [(Wenku8Node.wwwWenku8Net, Wenku8Node.wwwWenku8Net.node), (Wenku8Node.wwwWenku8Cc, Wenku8Node.wwwWenku8Cc.node)],
+                    values: [(Wenku8Node.wwwWenku8Net, Wenku8Node.wwwWenku8Net.label), (Wenku8Node.wwwWenku8Cc, Wenku8Node.wwwWenku8Cc.label), (Wenku8Node.proxyWorker, Wenku8Node.proxyWorker.label)],
                     title: "node".tr,
                   ).then((value) async {
                     if (value != null) controller.changeWenku8Node(value);
