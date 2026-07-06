@@ -7,5 +7,5 @@ enum Wenku8Node {
 }
 
 extension Wenku8NodeDesc on Wenku8Node {
-  String get node => ["https://www.wenku8.net", "https://www.wenku8.cc", "https://bitter-sky-42b3.wzx1205.workers.dev"][index];
+  String get node => ["https://www.wenku8.net", "https://www.wenku8.cc", "https://666.zuohe233.work"][index];
 }
