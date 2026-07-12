@@ -107,6 +107,13 @@ class Request {
     if (response.statusCode != null && response.statusCode! >= 300 && response.statusCode! < 400) {
       final location = response.headers.value('location');
       if (location != null) {
+        // Dio 的 TLS 指纹会触发 CF 盾，所以绝不跟随跳转到 login.php 的重定向
+        if (location.contains('login.php')) {
+          throw DioException(
+            requestOptions: response.requestOptions,
+            message: 'Session expired, please re-login',
+          );
+        }
         // location 可能是绝对 URL (如 "https://www.wenku8.net/") 也可能是相对路径 (如 "/login.php?...")
         // 直接拼接当且仅当 location 是相对路径时有效
         final redirectUrl = location.startsWith('http')
