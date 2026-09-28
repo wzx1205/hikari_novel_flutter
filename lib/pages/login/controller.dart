@@ -1,20 +1,18 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:get/get.dart';
 import 'package:hikari_novel_flutter/main.dart';
-import 'package:hikari_novel_flutter/models/common/wenku8_node.dart';
 import 'package:hikari_novel_flutter/models/page_state.dart';
-import 'package:hikari_novel_flutter/network/request.dart';
+import 'package:hikari_novel_flutter/common/constants.dart';
 import 'package:hikari_novel_flutter/router/route_path.dart';
+import 'package:hikari_novel_flutter/service/api_service.dart';
 
 import '../../common/database/database.dart';
 import '../../models/resource.dart';
-import '../../network/api.dart';
-import '../../network/parser.dart';
+import '../../parser/parser.dart';
 import '../../service/db_service.dart';
 import '../../service/local_storage_service.dart';
 
@@ -24,17 +22,13 @@ class LoginController extends GetxController {
   final CookieManager cookieManager = CookieManager.instance(webViewEnvironment: webViewEnvironment);
   InAppWebViewController? inAppWebViewController;
   final GlobalKey webViewKey = GlobalKey();
-  final InAppWebViewSettings settings = InAppWebViewSettings(
-    isInspectable: kDebugMode,
-    userAgent: Request.userAgent[HttpHeaders.userAgentHeader],
-    javaScriptEnabled: true,
-  );
+  final InAppWebViewSettings settings = InAppWebViewSettings(isInspectable: kDebugMode, userAgent: kUserAgent["User-Agent"], javaScriptEnabled: true);
   RxString currentUrl = "".obs;
 
   Rx<PageState> pageState = PageState.success.obs;
   String errorMsg = "";
 
-  String get url => "${Api.wenku8Node.node}/login.php";
+  String get url => "${ApiService.instance.wenku8Node.node}/login.php";
 
   @override
   void onInit() {
@@ -45,67 +39,70 @@ class LoginController extends GetxController {
   Future<void> saveCookie(InAppWebViewController webController, WebUri uri) async {
     showLoading.value = false;
 
-    //存储cookie
-    if (uri.toString().contains("wenku8") == true || uri.toString().contains("zuohe233.work") == true) {
-      // 使用 JS 从 WebView 内部读取 document.cookie，比 CookieManager API 更可靠
-      String cookiesJs;
-      try {
-        cookiesJs = (await webController.evaluateJavascript(source: "document.cookie")).toString();
-      } catch (_) {
-        // fallback to CookieManager API
-        final getCookie = await cookieManager.getCookies(url: uri);
-        final hasCookie = ["jieqiUserInfo", "jieqiVisitInfo"].every(
-          (keyword) => getCookie.any((cookieItem) => cookieItem.name.contains(keyword)),
-        );
-        if (hasCookie) {
-          String cookie = "jieqiUserInfo=${getCookie.firstWhere((cookieItem) => cookieItem.name == "jieqiUserInfo").value};";
-          cookie += "jieqiVisitInfo=${getCookie.firstWhere((cookieItem) => cookieItem.name == "jieqiVisitInfo").value}";
-          final cfClearance = getCookie.firstWhere(
-            (c) => c.name == "cf_clearance",
-            orElse: () => Cookie(name: "cf_clearance", value: ""),
-          );
-          if (cfClearance.value.isNotEmpty) {
-            cookie += ";cf_clearance=${cfClearance.value}";
-          }
-          await _onLoginSuccess(cookie);
-          return;
-        }
-        return;
-      }
+    //存储cookie（含 CF Worker 中继域名）
+    final uriStr = uri.toString();
+    if (!(uriStr.contains("wenku8") || uriStr.contains("zuohe233.work") || uriStr.contains("workers.dev"))) {
+      return;
+    }
 
-      // 从 document.cookie 字符串中解析所需 cookie
-      final cookieMap = <String, String>{};
-      for (final part in cookiesJs.split(';')) {
-        final trimmed = part.trim();
-        final eq = trimmed.indexOf('=');
-        if (eq > 0) {
-          cookieMap[trimmed.substring(0, eq)] = trimmed.substring(eq + 1);
-        }
-      }
+    // 优先用 JS 读 document.cookie；失败再走 CookieManager（可拿到 HttpOnly 的 cf_clearance）
+    String cookiesJs = "";
+    try {
+      cookiesJs = (await webController.evaluateJavascript(source: "document.cookie")).toString();
+    } catch (_) {
+      cookiesJs = "";
+    }
 
-      final hasCookie = cookieMap.containsKey('jieqiUserInfo') && cookieMap.containsKey('jieqiVisitInfo');
-      if (hasCookie) {
-        String cookie = "jieqiUserInfo=${cookieMap['jieqiUserInfo']};";
-        cookie += "jieqiVisitInfo=${cookieMap['jieqiVisitInfo']}";
-        final cfClearance = cookieMap['cf_clearance'];
-        if (cfClearance != null && cfClearance.isNotEmpty) {
-          cookie += ";cf_clearance=$cfClearance";
-        }
-        await _onLoginSuccess(cookie);
+    final cookieMap = _parseCookieString(cookiesJs);
+    if (cookieMap.containsKey('jieqiUserInfo') && cookieMap.containsKey('jieqiVisitInfo')) {
+      await _onLoginSuccess(_buildCookieHeader(cookieMap));
+      return;
+    }
+
+    final getCookie = await cookieManager.getCookies(url: uri);
+    final hasCookie = ["jieqiUserInfo", "jieqiVisitInfo"].every(
+      (keyword) => getCookie.any((cookieItem) => cookieItem.name.contains(keyword)),
+    );
+    if (!hasCookie) return;
+
+    final fromManager = <String, String>{
+      for (final c in getCookie) c.name: c.value,
+    };
+    await _onLoginSuccess(_buildCookieHeader(fromManager));
+  }
+
+  Map<String, String> _parseCookieString(String cookiesJs) {
+    final cookieMap = <String, String>{};
+    for (final part in cookiesJs.split(';')) {
+      final trimmed = part.trim();
+      final eq = trimmed.indexOf('=');
+      if (eq > 0) {
+        cookieMap[trimmed.substring(0, eq)] = trimmed.substring(eq + 1);
       }
     }
+    return cookieMap;
+  }
+
+  String _buildCookieHeader(Map<String, String> map) {
+    String cookie = "jieqiUserInfo=${map['jieqiUserInfo']};";
+    cookie += "jieqiVisitInfo=${map['jieqiVisitInfo']}";
+    final cfClearance = map['cf_clearance'];
+    if (cfClearance != null && cfClearance.isNotEmpty) {
+      cookie += ";cf_clearance=$cfClearance";
+    }
+    return cookie;
   }
 
   Future<void> _onLoginSuccess(String cookie) async {
     LocalStorageService.instance.setCookie(cookie);
-    Request.initCookie();
+    ApiService.instance.initCookie();
 
     try {
       await _getUserInfo();
       await _refreshBookshelf();
     } catch (e) {
       LocalStorageService.instance.setCookie(null); //清空cookie
-      Request.deleteCookie();
+      ApiService.instance.deleteCookie();
 
       final controller = inAppWebViewController;
       if (controller != null) {
@@ -122,7 +119,7 @@ class LoginController extends GetxController {
   }
 
   Future<void> _getUserInfo() async {
-    final data = await Api.getUserInfo();
+    final data = await ApiService.instance.getUserInfo();
     switch (data) {
       case Success():
         LocalStorageService.instance.setUserInfo(Parser.getUserInfo(data.data));
@@ -143,7 +140,7 @@ class LoginController extends GetxController {
   }
 
   Future<void> _insertAll(int index) async {
-    final result = await Api.getBookshelf(classId: index);
+    final result = await ApiService.instance.getBookshelf(classId: index);
     switch (result) {
       case Success():
         {

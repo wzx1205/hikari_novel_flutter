@@ -3,11 +3,11 @@ import 'package:hikari_novel_flutter/models/common/wenku8_node.dart';
 import 'package:hikari_novel_flutter/models/novel_detail.dart';
 import 'package:hikari_novel_flutter/models/recommend_block.dart';
 import 'package:hikari_novel_flutter/models/reply_item.dart';
-import 'package:hikari_novel_flutter/network/api.dart';
+import 'package:hikari_novel_flutter/service/api_service.dart';
 import 'package:html/dom.dart';
 import 'package:html/parser.dart';
 
-import 'image_url_helper.dart';
+import '../common/image_url_helper.dart';
 
 import '../common/log.dart';
 import '../common/util.dart';
@@ -22,7 +22,7 @@ import '../models/user_info.dart';
 ///此部分的代码基本都是沿用之前的逻辑，然后用AI转化了下
 class Parser {
   static List<NovelCover> parseToList(String htmlContent) {
-    final node = Api.wenku8Node.node.replaceAll("https://", "");
+    final node = ApiService.instance.wenku8Node.node.replaceAll("https://", "");
     final List<NovelCover> result = [];
     final Document document = parse(htmlContent);
 
@@ -36,8 +36,8 @@ class Parser {
     for (final Element novelItem in bookItems) {
       try {
         final Element? imgElement = novelItem.querySelector("img");
-        String img = imgElement?.attributes['src'] ?? '';
-        img = ImageUrlHelper.normalize(img);
+        final String rawImg = imgElement?.attributes['src'] ?? '';
+        String img = rawImg;
 
         final Element? titleLinkElement = novelItem.querySelector("a");
         final String title = titleLinkElement?.attributes['title'] ?? "";
@@ -51,10 +51,10 @@ class Parser {
           continue;
         }
 
-        if (img == "/images/noimg.jpg") {
+        if (rawImg == "/images/noimg.jpg" || img.isEmpty) {
           img = "https://$node/modules/article/images/nocover.jpg";
-        } else if (img.isEmpty) {
-          img = "https://$node/modules/article/images/nocover.jpg";
+        } else {
+          img = ImageUrlHelper.normalize(img);
         }
 
         String aid = "";
@@ -73,7 +73,7 @@ class Parser {
 
         if (title != "" && detailUrl.isNotEmpty) {
           result.add(NovelCover(title, img, aid));
-        } else {}
+        }
       } catch (e, stackTrace) {
         Log.e(stackTrace);
       }
@@ -124,7 +124,10 @@ class Parser {
     final table2 = t1.getElementsByTagName('table')[2];
     final td2 = table2.getElementsByTagName('td')[1];
     final spans = td2.getElementsByTagName('span');
-    String introduce = spans[5].innerHtml.replaceAll("<br>", "\n");
+    String introduce = "";
+    try {
+      introduce = spans[5].innerHtml.replaceAll("<br>", "\n");
+    } catch (_) {}
     final String tag = spans[0].text;
     String tempHeat = spans[1].text;
     bool isAnimated = false;
@@ -134,22 +137,29 @@ class Parser {
     } catch (_) {
       isAnimated = false;
     }
+
+    String trending;
+    String heat;
     if (isOffShelves) {
+      //书籍下架
       introduce = tempHeat;
-      tempHeat = "not_trending".tr;
+      heat = "not_trending".tr;
+      trending = "not_trending".tr;
     } else {
       final rawDate = finUpdate.split("update".tr)[0];
       finUpdate = Util.getDateTime(rawDate) + "update".tr;
       finUpdate = finUpdate.trim();
+
+      try {
+        trending = "increase_rate".tr + tempHeat.substring(18, 20);
+      } catch (_) {
+        trending = "increase_rate".tr + tempHeat.substring(18, 19);
+      }
+
+      heat = "heat".tr + tempHeat.substring(5, 7);
     }
-    String trending;
-    try {
-      trending = "increase_rate".tr + tempHeat.substring(18, 20);
-    } catch (_) {
-      trending = "increase_rate".tr + tempHeat.substring(18, 19);
-    }
+
     final tags = tag.replaceRange(0, 7, "").split(" ");
-    final heat = "heat".tr + tempHeat.substring(5, 7);
 
     return NovelDetail(title, author, status, finUpdate, imgUrl, introduce, tags, heat, trending, isAnimated);
   }
@@ -183,17 +193,13 @@ class Parser {
       List<Element> tempBlock1Content = block.querySelectorAll("div[style='float: left;text-align:center;width: 95px; height:155px;overflow:hidden;']");
       for (var j in tempBlock1Content) {
         String title = j.getElementsByTagName("a")[1].text;
-        String img = j.getElementsByTagName("img")[0].attributes["src"] ?? "";
-        if (!img.startsWith("https")) {
-          img = img.replaceFirst("http", "https");
-        }
+        String img = ImageUrlHelper.normalize(j.getElementsByTagName("img")[0].attributes["src"] ?? "");
         String url = j.getElementsByTagName("a")[0].attributes["href"] ?? "";
         String aid = url.contains("book/") ? url.substring(url.indexOf("book/") + 5, url.indexOf(".htm")) : "";
         blockList.add(NovelCover(title, img, aid));
       }
       recommendBlockList.add(RecommendBlock(blockTitle, blockList));
     }
-    RegExp regex = RegExp(r"^(http|https)://[^\s/$.?#].[^\s]*$");
     for (int i = 2; i <= 3; i++) {
       Element? b = document.querySelectorAll("div.main")[i];
       List<NovelCover> blockList = [];
@@ -205,11 +211,7 @@ class Parser {
       for (var j in tempBlock1Content) {
         try {
           String title = j.getElementsByTagName("a")[1].text;
-          String img = j.getElementsByTagName("img")[0].attributes["src"] ?? "";
-          if (!regex.hasMatch(img)) img = "";
-          if (!img.startsWith("https")) {
-            img = img.replaceFirst("http", "https");
-          }
+          final String img = ImageUrlHelper.normalize(j.getElementsByTagName("img")[0].attributes["src"] ?? "");
           String url = j.getElementsByTagName("a")[0].attributes["href"] ?? "";
           String aid = url.contains("book/") ? url.substring(url.indexOf("book/") + 5, url.indexOf(".htm")) : "";
           blockList.add(NovelCover(title, img, aid));

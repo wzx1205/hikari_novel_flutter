@@ -2,10 +2,10 @@ import 'package:get/get.dart';
 
 import '../../models/cache_status.dart';
 import '../../models/chapter_cache_task.dart';
-import '../../network/chapter_downloader.dart';
+import '../../service/chapter_downloader_service.dart';
 
 class CacheQueueController extends GetxService {
-  final downloader = ChapterDownloader();
+  final downloader = Get.find<ChapterDownloaderService>();
 
   //可观察队列
   final RxList<ChapterCacheTask> tasks = <ChapterCacheTask>[].obs;
@@ -122,7 +122,6 @@ class CacheQueueController extends GetxService {
       }
     }
   }
-
 
   Future<void> cancelTask(String uuid) async {
     downloader.cancel(uuid);

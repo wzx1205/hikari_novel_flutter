@@ -12,7 +12,7 @@ import 'package:hikari_novel_flutter/common/extension.dart';
 import 'package:hikari_novel_flutter/models/dual_page_mode.dart';
 import 'package:hikari_novel_flutter/models/reader_direction.dart';
 import 'package:hikari_novel_flutter/models/resource.dart';
-import 'package:hikari_novel_flutter/network/parser.dart';
+import 'package:hikari_novel_flutter/parser/parser.dart';
 import 'package:hikari_novel_flutter/pages/novel_detail/controller.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
@@ -24,12 +24,13 @@ import '../../common/database/database.dart';
 import '../../common/log.dart';
 import '../../models/cat_volume.dart';
 import '../../models/page_state.dart';
-import '../../network/api.dart';
+import '../../service/api_service.dart';
 import '../../service/db_service.dart';
 import '../../service/local_storage_service.dart';
 import 'widgets/paper_curl_pager.dart';
 
 class ReaderController extends GetxController {
+  static const MethodChannel _volumeKeyChannel = MethodChannel('hikari/reader_volume_keys');
   final _novelDetailController = Get.find<NovelDetailController>();
 
   late List<CatVolume> catalogue;
@@ -160,6 +161,7 @@ class ReaderController extends GetxController {
     TtsService.instance.stop();
     if (readerSettingsState.value.wakeLock) WakelockPlus.toggle(enable: false);
     _applyReaderSystemUi(false);
+    _setVolumeKeyHandlingEnabled(false);
     super.onClose();
   }
 
@@ -209,7 +211,7 @@ class ReaderController extends GetxController {
   }
 
   Future<void> _getContentByNetwork() async {
-    final result = await Api.getNovelContent(aid: aid, cid: cid);
+    final result = await ApiService.instance.getNovelContent(aid: aid, cid: cid);
     switch (result) {
       case Success():
         {
@@ -343,11 +345,29 @@ class ReaderController extends GetxController {
   void changeReaderDirection(ReaderDirection d) {
     readerSettingsState.value = readerSettingsState.value.copyWith(direction: d);
     LocalStorageService.instance.setReaderDirection(d);
+    _setVolumeKeyHandlingEnabled(_volumeKeyPageTurningEnabled);
   }
 
   void changeReaderPageTurningAnimation(bool enabled) {
     readerSettingsState.value = readerSettingsState.value.copyWith(pageTurningAnimation: enabled);
     LocalStorageService.instance.setReaderPageTurningAnimation(enabled);
+  }
+
+  void changeReaderVolumeKeyPageTurning(bool enabled) {
+    readerSettingsState.value = readerSettingsState.value.copyWith(volumeKeyPageTurning: enabled);
+    LocalStorageService.instance.setReaderVolumeKeyPageTurning(enabled);
+    _setVolumeKeyHandlingEnabled(_volumeKeyPageTurningEnabled);
+  }
+
+  bool get _volumeKeyPageTurningEnabled => readerSettingsState.value.volumeKeyPageTurning && readerSettingsState.value.direction != ReaderDirection.upToDown;
+
+  Future<void> _setVolumeKeyHandlingEnabled(bool enabled) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _volumeKeyChannel.invokeMethod('setEnabled', {'enabled': enabled});
+    } on PlatformException {
+      // Native volume-key support is optional on non-Android targets.
+    }
   }
 
   void changeReaderWakeLock(bool enabled) {
@@ -489,10 +509,10 @@ class ReaderController extends GetxController {
 
   Future<bool?> pickTextStyleFile() async {
     try {
-      final result = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['ttf', 'otf']);
-      if (result == null) return null; // 用户取消
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['ttf', 'otf']);
+      if (file == null) return null; // 用户取消
 
-      final tempPath = result.files.single.path!;
+      final tempPath = file.path!;
 
       await deleteFontDir();
 
@@ -575,10 +595,10 @@ class ReaderController extends GetxController {
 
   Future<bool?> pickBgImageFile(bool isDark) async {
     try {
-      final result = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['jpg', 'png', 'jpeg']);
-      if (result == null) return null; // 用户取消
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['jpg', 'png', 'jpeg']);
+      if (file == null) return null; // 用户取消
 
-      final tempPath = result.files.single.path!;
+      final tempPath = file.path!;
 
       final srcFile = File(tempPath);
       final ext = path.extension(tempPath);
@@ -663,6 +683,7 @@ List<int>? _findIndexPositionInCatalogue(Map<String, dynamic> args) {
 class ReaderSettingsState {
   final ReaderDirection direction;
   final bool pageTurningAnimation;
+  final bool volumeKeyPageTurning;
   final bool wakeLock;
   final DualPageMode dualPageMode;
   final double dualPageSpacing;
@@ -692,6 +713,7 @@ class ReaderSettingsState {
   ReaderSettingsState({
     required this.direction,
     required this.pageTurningAnimation,
+    required this.volumeKeyPageTurning,
     required this.wakeLock,
     required this.dualPageMode,
     required this.dualPageSpacing,
@@ -722,6 +744,7 @@ class ReaderSettingsState {
   ReaderSettingsState copyWith({
     ReaderDirection? direction,
     bool? pageTurningAnimation,
+    bool? volumeKeyPageTurning,
     bool? wakeLock,
     DualPageMode? dualPageMode,
     double? dualPageSpacing,
@@ -750,6 +773,7 @@ class ReaderSettingsState {
   }) => ReaderSettingsState(
     direction: direction ?? this.direction,
     pageTurningAnimation: pageTurningAnimation ?? this.pageTurningAnimation,
+    volumeKeyPageTurning: volumeKeyPageTurning ?? this.volumeKeyPageTurning,
     wakeLock: wakeLock ?? this.wakeLock,
     dualPageMode: dualPageMode ?? this.dualPageMode,
     dualPageSpacing: dualPageSpacing ?? this.dualPageSpacing,
@@ -780,6 +804,7 @@ class ReaderSettingsState {
   ReaderSettingsState.init()
     : direction = LocalStorageService.instance.getReaderDirection(),
       pageTurningAnimation = LocalStorageService.instance.getReaderPageTurningAnimation(),
+      volumeKeyPageTurning = LocalStorageService.instance.getReaderVolumeKeyPageTurning(),
       wakeLock = LocalStorageService.instance.getReaderWakeLock(),
       dualPageMode = LocalStorageService.instance.getReaderDualPageMode(),
       dualPageSpacing = LocalStorageService.instance.getReaderDualPageSpacing(),

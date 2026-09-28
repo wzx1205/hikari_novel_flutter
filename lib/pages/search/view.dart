@@ -7,6 +7,7 @@ import 'package:responsive_grid_list/responsive_grid_list.dart';
 import '../../service/db_service.dart';
 import '../../widgets/novel_cover_card.dart';
 import 'controller.dart' as c;
+import 'widgets/search_loading_view.dart';
 
 class SearchPage extends StatelessWidget {
   final String? author;
@@ -132,8 +133,8 @@ class SearchPage extends StatelessWidget {
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 8),
                   child: EasyRefresh(
-                    onRefresh: () => controller.getPage(false),
-                    onLoad: () => controller.getPage(true),
+                    onRefresh: () => controller.pageState.value == PageState.success ? controller.getPage(false) : null,
+                    onLoad: () => controller.pageState.value == PageState.success ? controller.getPage(true) : null,
                     child: Padding(
                       padding: EdgeInsets.zero,
                       child: ResponsiveGridList(
@@ -149,12 +150,7 @@ class SearchPage extends StatelessWidget {
                 ),
               ),
             ),
-            Obx(
-              () => Offstage(
-                offstage: controller.pageState.value != PageState.loading,
-                child: Center(child: CircularProgressIndicator()),
-              ),
-            ),
+            Obx(() => SearchLoadingView(isLoading: controller.pageState.value == PageState.loading, onRetry: () => controller.getPage(false))),
             Obx(
               () => Offstage(
                 offstage: controller.pageState.value != PageState.empty,

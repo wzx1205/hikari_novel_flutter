@@ -2,16 +2,16 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:enough_convert/enough_convert.dart';
-import 'package:hikari_novel_flutter/network/api.dart';
-import 'package:hikari_novel_flutter/network/request.dart';
+import 'package:get/get.dart' hide Response;
+import 'package:hikari_novel_flutter/service/api_service.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../common/log.dart';
-import '../models/common/charsets_type.dart';
+import '../models/common/charset_type.dart';
 import '../models/common/wenku8_node.dart';
 
-class ChapterDownloader {
-  final Dio _dio = Request.dio;
+class ChapterDownloaderService extends GetxService {
+  final Dio _dio = ApiService.instance.dio;
 
   // 存储取消令牌：taskId -> CancelToken
   final Map<String, CancelToken> _cancelTokens = {};
@@ -31,9 +31,6 @@ class ChapterDownloader {
         Log.e('取消任务 $taskId 失败: $e');
       }
     }
-    // 清理状态
-    _cancelTokens.remove(taskId);
-    _downloadingStatus.remove(taskId);
   }
 
   /// 清理指定任务的取消令牌（用于下载完成/失败后）
@@ -56,12 +53,7 @@ class ChapterDownloader {
   /// [aid] 书籍ID
   /// [cid] 章节ID
   /// [onProgress] 下载进度回调 (已完成字节数, 总字节数)
-  Future<String> download({
-    required String taskId,
-    required String aid,
-    required String cid,
-    Function(int received, int total)? onProgress,
-  }) async {
+  Future<String> download({required String taskId, required String aid, required String cid, Function(int received, int total)? onProgress}) async {
     // 检查是否已有相同任务在下载
     if (isDownloading(taskId)) {
       throw Exception('任务 $taskId 正在下载中，请勿重复下载');
@@ -88,18 +80,13 @@ class ChapterDownloader {
       }
       final savePath = "${cacheDir.path}/${aid}_$cid.txt";
 
-      var url = "${Api.wenku8Node.node}/modules/article/reader.php?aid=$aid&cid=$cid";
-      url += "?";
+      final charset = switch (ApiService.instance.charsetType) {
+        CharsetType.gbk => "gbk",
+        CharsetType.big5Hkscs => "big5",
+      };
+      final url = "${ApiService.instance.wenku8Node.node}/modules/article/reader.php?aid=$aid&cid=$cid&charset=$charset";
 
-      // 设置编码格式
-      switch (Api.charsetsType) {
-        case CharsetsType.gbk:
-          url += "charset=gbk";
-        case CharsetsType.big5Hkscs:
-          url += "charset=big5";
-      }
-
-      Log.d("$url ${Api.charsetsType.name}");
+      Log.d("$url ${ApiService.instance.charsetType.name}");
 
       // 发起网络请求获取章节内容
       final Response response = await _dio.get(
@@ -110,26 +97,22 @@ class ChapterDownloader {
           if (onProgress != null && total > 0) {
             onProgress(received, total);
           }
-        }
+        },
       );
 
       // 检查是否在请求过程中被取消
       if (cancelToken.isCancelled) {
-        throw DioException(
-          requestOptions: response.requestOptions,
-          type: DioExceptionType.cancel,
-          message: '任务 $taskId 下载过程中被取消',
-        );
+        throw DioException(requestOptions: response.requestOptions, type: DioExceptionType.cancel, message: '任务 $taskId 下载过程中被取消');
       }
 
       // 解码
       String content;
-      switch (Api.charsetsType) {
-        case CharsetsType.gbk:
+      switch (ApiService.instance.charsetType) {
+        case CharsetType.gbk:
           {
             content = GbkCodec().decode(response.data as Uint8List);
           }
-        case CharsetsType.big5Hkscs:
+        case CharsetType.big5Hkscs:
           {
             content = Big5Codec().decode(response.data as Uint8List);
           }
@@ -141,7 +124,6 @@ class ChapterDownloader {
 
       Log.i('章节 $aid-$cid 下载完成，保存路径：$savePath');
       return savePath;
-
     } on DioException catch (e) {
       // 处理Dio异常（重点处理取消类型）
       if (e.type == DioExceptionType.cancel) {

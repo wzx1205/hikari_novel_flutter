@@ -212,6 +212,7 @@ class AppTranslations extends Translations {
       "reply": "回复",
       "reply_content": "回复内容",
       "search_too_quickly_tip": "两次搜索的间隔时间不得少于5秒",
+      "search_loading_too_long_tip": "加载时间过长，可能是网络问题，请稍后重试",
       "user_information": "用户信息",
       "username": "用户名",
       "level": "等级",
@@ -238,6 +239,8 @@ class AppTranslations extends Translations {
       "failed": "失败",
       "canceled": "已取消",
       "page_turning_animation": "翻页动画",
+      "volume_key_page_turning": "音量键翻页",
+      "volume_key_page_turning_android_only": "非 Android 手机无法使用此功能",
       "move_to_other_bookshelf": "移动到其他书架",
       "remove_from_bookshelf": "从书架中移出",
       "bookshelf_number_selection": "第 @no 书架",
@@ -498,6 +501,7 @@ class AppTranslations extends Translations {
       "reply": "回覆",
       "reply_content": "回覆內容",
       "search_too_quickly_tip": "兩次搜尋間隔不得少於5秒",
+      "search_loading_too_long_tip": "載入時間過長，可能是網路問題，請稍後再試",
       "user_information": "使用者資訊",
       "username": "使用者名稱",
       "level": "等級",
@@ -524,6 +528,8 @@ class AppTranslations extends Translations {
       "failed": "失敗",
       "canceled": "已取消",
       "page_turning_animation": "翻頁動畫",
+      "volume_key_page_turning": "音量鍵翻頁",
+      "volume_key_page_turning_android_only": "非 Android 手機無法使用此功能",
       "move_to_other_bookshelf": "移動至其他書架",
       "remove_from_bookshelf": "從書架移除",
       "bookshelf_number_selection": "第 @no 書架",
@@ -573,6 +579,6 @@ class AppTranslations extends Translations {
       "para_indent": "首行縮進",
       "para_spacing": "段距",
       "bottomStatusBarHorizontalSpacing": "底部狀態欄文字邊距",
-    }
+    },
   };
 }
