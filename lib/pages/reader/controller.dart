@@ -509,8 +509,9 @@ class ReaderController extends GetxController {
 
   Future<bool?> pickTextStyleFile() async {
     try {
-      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['ttf', 'otf']);
-      if (file == null) return null; // 用户取消
+      final result = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['ttf', 'otf']);
+      if (result == null || result.files.isEmpty) return null;
+      final file = result.files.single; // 用户取消
 
       final tempPath = file.path!;
 
@@ -595,8 +596,9 @@ class ReaderController extends GetxController {
 
   Future<bool?> pickBgImageFile(bool isDark) async {
     try {
-      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['jpg', 'png', 'jpeg']);
-      if (file == null) return null; // 用户取消
+      final result = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['jpg', 'png', 'jpeg']);
+      if (result == null || result.files.isEmpty) return null;
+      final file = result.files.single; // 用户取消
 
       final tempPath = file.path!;
 

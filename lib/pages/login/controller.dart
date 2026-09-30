@@ -5,12 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:get/get.dart';
 import 'package:hikari_novel_flutter/main.dart';
+import 'package:hikari_novel_flutter/models/common/wenku8_node.dart';
 import 'package:hikari_novel_flutter/models/page_state.dart';
-import 'package:hikari_novel_flutter/common/constants.dart';
 import 'package:hikari_novel_flutter/router/route_path.dart';
 import 'package:hikari_novel_flutter/service/api_service.dart';
 
 import '../../common/database/database.dart';
+import '../../common/log.dart';
 import '../../models/resource.dart';
 import '../../parser/parser.dart';
 import '../../service/db_service.dart';
@@ -22,8 +23,16 @@ class LoginController extends GetxController {
   final CookieManager cookieManager = CookieManager.instance(webViewEnvironment: webViewEnvironment);
   InAppWebViewController? inAppWebViewController;
   final GlobalKey webViewKey = GlobalKey();
-  final InAppWebViewSettings settings = InAppWebViewSettings(isInspectable: kDebugMode, userAgent: kUserAgent["User-Agent"], javaScriptEnabled: true);
+  final InAppWebViewSettings settings = InAppWebViewSettings(
+    isInspectable: kDebugMode,
+    // 与 iOS scripting 同款 iPhone UA，降低 CF 对登录 POST 的拦截概率
+    userAgent:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+    javaScriptEnabled: true,
+    mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
+  );
   RxString currentUrl = "".obs;
+  RxBool submitting = false.obs;
 
   Rx<PageState> pageState = PageState.success.obs;
   String errorMsg = "";
@@ -36,51 +45,78 @@ class LoginController extends GetxController {
     cookieManager.deleteAllCookies();
   }
 
-  Future<void> saveCookie(InAppWebViewController webController, WebUri uri) async {
-    showLoading.value = false;
-
-    //存储cookie（含 CF Worker 中继域名）
-    final uriStr = uri.toString();
-    if (!(uriStr.contains("wenku8") || uriStr.contains("zuohe233.work") || uriStr.contains("workers.dev"))) {
+  /// 走 BrowserClient 的登录（scripting 同款：POST do=login）
+  Future<void> doProgrammaticLogin(String user, String pass, {int useCookieSeconds = 31536000}) async {
+    if (submitting.value) return;
+    if (user.isEmpty || pass.isEmpty) {
+      errorMsg = "please_input_username".tr;
+      pageState.value = PageState.error;
       return;
     }
-
-    // 优先用 JS 读 document.cookie；失败再走 CookieManager（可拿到 HttpOnly 的 cf_clearance）
-    String cookiesJs = "";
+    submitting.value = true;
+    showLoading.value = true;
     try {
-      cookiesJs = (await webController.evaluateJavascript(source: "document.cookie")).toString();
-    } catch (_) {
-      cookiesJs = "";
+      Log.d("[login] submit via BrowserClient user=$user usecookie=$useCookieSeconds");
+      final result = await ApiService.instance.login(user, pass, useCookieSeconds: useCookieSeconds);
+      if (!result.success) {
+        errorMsg = result.message;
+        pageState.value = PageState.error;
+        return;
+      }
+
+      final map = await _collectSessionCookies();
+      Log.d("[login] cookie names=${map.keys.toList()}");
+      if (!map.containsKey('jieqiUserInfo') || !map.containsKey('jieqiVisitInfo')) {
+        Log.d("[login] missing session cookie after XHR login");
+        errorMsg = "login_cookie_missing_tip".tr;
+        pageState.value = PageState.error;
+        return;
+      }
+      await _onLoginSuccess(_buildCookieHeader(map));
+    } catch (e) {
+      Log.d("[login] error $e");
+      errorMsg = e.toString();
+      pageState.value = PageState.error;
+    } finally {
+      submitting.value = false;
+      showLoading.value = false;
     }
-
-    final cookieMap = _parseCookieString(cookiesJs);
-    if (cookieMap.containsKey('jieqiUserInfo') && cookieMap.containsKey('jieqiVisitInfo')) {
-      await _onLoginSuccess(_buildCookieHeader(cookieMap));
-      return;
-    }
-
-    final getCookie = await cookieManager.getCookies(url: uri);
-    final hasCookie = ["jieqiUserInfo", "jieqiVisitInfo"].every(
-      (keyword) => getCookie.any((cookieItem) => cookieItem.name.contains(keyword)),
-    );
-    if (!hasCookie) return;
-
-    final fromManager = <String, String>{
-      for (final c in getCookie) c.name: c.value,
-    };
-    await _onLoginSuccess(_buildCookieHeader(fromManager));
   }
 
-  Map<String, String> _parseCookieString(String cookiesJs) {
-    final cookieMap = <String, String>{};
-    for (final part in cookiesJs.split(';')) {
-      final trimmed = part.trim();
-      final eq = trimmed.indexOf('=');
-      if (eq > 0) {
-        cookieMap[trimmed.substring(0, eq)] = trimmed.substring(eq + 1);
-      }
+  /// 从 WebView CookieManager 收集会话 Cookie。
+  /// wenku8 可能落在 http:// 源，http/https 都要查。
+  Future<Map<String, String>> _collectSessionCookies() async {
+    final map = <String, String>{};
+    final node = ApiService.instance.wenku8Node.node;
+    final host = Uri.parse(node).host;
+    final probeUrls = <String>[
+      'http://$host/',
+      'https://$host/',
+      node,
+      'http://www.wenku8.net/',
+      'https://www.wenku8.net/',
+      'http://www.wenku8.cc/',
+      'https://www.wenku8.cc/',
+    ];
+    for (final u in probeUrls) {
+      try {
+        final cookies = await cookieManager.getCookies(url: WebUri(u));
+        for (final c in cookies) {
+          if (c.name.isNotEmpty && c.value.isNotEmpty) map[c.name] = c.value;
+        }
+      } catch (_) {}
     }
-    return cookieMap;
+    if (!map.containsKey('jieqiUserInfo') || !map.containsKey('jieqiVisitInfo')) {
+      try {
+        final js = (await inAppWebViewController?.evaluateJavascript(source: 'document.cookie'))?.toString() ?? '';
+        for (final part in js.split(';')) {
+          final t = part.trim();
+          final eq = t.indexOf('=');
+          if (eq > 0) map[t.substring(0, eq)] = t.substring(eq + 1);
+        }
+      } catch (_) {}
+    }
+    return map;
   }
 
   String _buildCookieHeader(Map<String, String> map) {
@@ -99,21 +135,29 @@ class LoginController extends GetxController {
 
     try {
       await _getUserInfo();
-      await _refreshBookshelf();
     } catch (e) {
-      LocalStorageService.instance.setCookie(null); //清空cookie
+      LocalStorageService.instance.setCookie(null);
       ApiService.instance.deleteCookie();
 
       final controller = inAppWebViewController;
       if (controller != null) {
         inAppWebViewController = null;
-        controller.dispose(); //销毁webview，停止加载网页
+        controller.dispose();
       }
 
       errorMsg = e.toString();
       pageState.value = PageState.error;
       return;
     }
+
+    // 书架后台补拉，失败不阻断登录
+    unawaited(() async {
+      try {
+        await _refreshBookshelf();
+      } catch (e) {
+        Log.d("[login] refreshBookshelf failed: $e");
+      }
+    }());
 
     Get.offAllNamed(RoutePath.main);
   }
@@ -122,7 +166,12 @@ class LoginController extends GetxController {
     final data = await ApiService.instance.getUserInfo();
     switch (data) {
       case Success():
-        LocalStorageService.instance.setUserInfo(Parser.getUserInfo(data.data));
+        try {
+          LocalStorageService.instance.setUserInfo(Parser.getUserInfo(data.data));
+        } catch (e) {
+          // 解析失败不阻断登录（cookie 已就绪）
+          Log.d("[login] parse user info failed: $e");
+        }
       case Error():
         {
           throw data.error;

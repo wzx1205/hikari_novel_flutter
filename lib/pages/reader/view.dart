@@ -193,7 +193,18 @@ class _ReaderPageState extends State<ReaderPage> {
                                         return;
                                       }
 
-                                      await tts.startChapter(cleaned);
+                                      // 读完本章自动进入下一章
+                                      tts.autoNextChapter.value = true;
+                                      tts.onChapterComplete = () async {
+                                        controller.nextChapter();
+                                        // 等待章节加载
+                                        await Future.delayed(const Duration(milliseconds: 400));
+                                        final nextText = controller.text.value;
+                                        final cleaned = nextText.replaceAll(RegExp(r'\s+'), ' ').trim();
+                                        if (cleaned.isEmpty) return;
+                                        await tts.startChapter(cleaned, title: controller.chapterTitle.value);
+                                      };
+                                      await tts.startChapter(cleaned, title: controller.chapterTitle.value);
                                     },
                                     icon: Obx(() {
                                       final tts = TtsService.instance;

@@ -27,7 +27,7 @@ class _TtsFloatingControllerState extends State<TtsFloatingController> {
       final size = MediaQuery.of(context).size;
       final safeTop = MediaQuery.of(context).padding.top + 8;
       final safeBottom = MediaQuery.of(context).padding.bottom + 8;
-      final clamped = Offset(offset.dx.clamp(8, size.width - 8 - 240), offset.dy.clamp(safeTop, size.height - safeBottom - 56));
+      final clamped = Offset(offset.dx.clamp(8, size.width - 8 - 320), offset.dy.clamp(safeTop, size.height - safeBottom - 56));
       offset = clamped;
 
       return Positioned(
@@ -55,8 +55,8 @@ class _TtsFloatingControllerState extends State<TtsFloatingController> {
       elevation: dragging ? 8 : 4,
       borderRadius: BorderRadius.circular(14),
       child: Container(
-        width: 240,
-        height: 52,
+        width: 320,
+        height: 56,
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
           color: bg,
@@ -66,14 +66,32 @@ class _TtsFloatingControllerState extends State<TtsFloatingController> {
         child: Row(
           children: [
             Icon(Icons.record_voice_over_outlined, color: fg.withValues(alpha: 0.75), size: 20),
-            const SizedBox(width: 8),
+            const SizedBox(width: 4),
             Expanded(
-              child: Text(
-                "listen_to_books".tr,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: kBaseTileSubtitleTextStyle.copyWith(color: fg),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    tts.sessionTitle.value.isEmpty ? "listen_to_books".tr : tts.sessionTitle.value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: kBaseTileSubtitleTextStyle.copyWith(color: fg),
+                  ),
+                  if (tts.sleepRemaining.value > 0)
+                    Text(
+                      "${tts.sleepRemaining.value} min",
+                      maxLines: 1,
+                      style: kBaseTileSubtitleTextStyle.copyWith(color: fg.withValues(alpha: 0.6), fontSize: 10),
+                    ),
+                ],
               ),
+            ),
+            IconButton(
+              tooltip: "上一句",
+              iconSize: 20,
+              onPressed: tts.isSessionActive.value ? () => tts.previousChunk() : null,
+              icon: const Icon(Icons.skip_previous_outlined),
             ),
             IconButton(
               tooltip: tts.isPlaying.value ? "pause".tr : "play".tr,
@@ -87,14 +105,40 @@ class _TtsFloatingControllerState extends State<TtsFloatingController> {
                   final text = reader.text.value;
                   final cleaned = text.replaceAll(RegExp(r'\s+'), ' ').trim();
                   if (cleaned.isNotEmpty) {
-                    await tts.startChapter(cleaned);
+                    tts.autoNextChapter.value = true;
+                    tts.onChapterComplete = () async {
+                      reader.nextChapter();
+                      await Future.delayed(const Duration(milliseconds: 400));
+                      final nextText = reader.text.value.replaceAll(RegExp(r'\s+'), ' ').trim();
+                      if (nextText.isNotEmpty) {
+                        await tts.startChapter(nextText, title: reader.chapterTitle.value);
+                      }
+                    };
+                    await tts.startChapter(cleaned, title: reader.chapterTitle.value);
                   }
                 }
               },
               icon: Icon(tts.isPlaying.value ? Icons.pause_circle_outline : Icons.play_circle_outline),
             ),
+            IconButton(
+              tooltip: "下一句",
+              iconSize: 20,
+              onPressed: tts.isSessionActive.value ? () => tts.nextChunk() : null,
+              icon: const Icon(Icons.skip_next_outlined),
+            ),
+            PopupMenuButton<int>(
+              tooltip: "定时关闭",
+              iconSize: 20,
+              icon: const Icon(Icons.timer_outlined),
+              onSelected: (m) => tts.setSleepTimer(m),
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 0, child: Text("关闭定时")),
+                PopupMenuItem(value: 15, child: Text("15 分钟")),
+                PopupMenuItem(value: 30, child: Text("30 分钟")),
+                PopupMenuItem(value: 60, child: Text("60 分钟")),
+              ],
+            ),
             IconButton(tooltip: "stop".tr, iconSize: 22, onPressed: () => tts.stop(), icon: const Icon(Icons.stop_circle_outlined)),
-            IconButton(tooltip: "exit".tr, iconSize: 22, onPressed: () => tts.stop(), icon: const Icon(Icons.close)),
           ],
         ),
       ),

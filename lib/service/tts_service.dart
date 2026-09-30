@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -37,6 +38,24 @@ class TtsService extends GetxService {
   final isSessionActive = false.obs;
   final sessionTitle = ''.obs;
   final sessionProgress = 0.0.obs;
+
+  /// 当前正在朗读的句块（用于阅读器高亮）
+  final currentChunkIndex = (-1).obs;
+  final currentChunkText = ''.obs;
+
+  /// 会话代际：换章/停止时递增，丢弃过期 completion 回调
+  int _sessionGen = 0;
+
+  /// 睡眠定时（分钟）；0 = 不定时
+  final sleepMinutes = 0.obs;
+  final sleepRemaining = 0.obs;
+  Timer? _sleepTimer;
+
+  /// 读完本章后自动下一章
+  final autoNextChapter = false.obs;
+
+  /// 由阅读器注入：读完本章后调用
+  Future<void> Function()? onChapterComplete;
 
   List<String> _chunks = const [];
   int _chunkIndex = 0;
@@ -292,6 +311,8 @@ class TtsService extends GetxService {
     final cleaned = fullText.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (cleaned.isEmpty) return;
 
+    _sessionGen++;
+    final gen = _sessionGen;
     sessionTitle.value = title;
     isSessionActive.value = true;
     isPaused.value = false;
@@ -299,9 +320,12 @@ class TtsService extends GetxService {
     _chunks = _splitToChunks(cleaned);
     _chunkIndex = 0;
     sessionProgress.value = 0.0;
+    currentChunkIndex.value = 0;
+    currentChunkText.value = _chunks.isEmpty ? '' : _chunks.first;
 
     lastSpokenText.value = cleaned;
-    await _speakCurrentChunk();
+    await _speakCurrentChunk(gen);
+    _ensureSleepTimer();
   }
 
   Future<void> resumeSession() async {
@@ -367,17 +391,22 @@ class TtsService extends GetxService {
     _endSession();
   }
 
-  Future<void> _speakCurrentChunk() async {
+  Future<void> _speakCurrentChunk([int? gen]) async {
     if (!isSessionActive.value) return;
+    if (gen != null && gen != _sessionGen) return;
     if (_chunkIndex < 0 || _chunkIndex >= _chunks.length) {
-      _endSession();
+      await _onChapterFinished();
       return;
     }
     final chunk = _chunks[_chunkIndex];
+    currentChunkIndex.value = _chunkIndex;
+    currentChunkText.value = chunk;
     try {
       final r = await _tts.speak(chunk);
+      if (gen != null && gen != _sessionGen) return;
       _handleSpeakResult(r);
     } catch (_) {
+      if (gen != null && gen != _sessionGen) return;
       _endSession();
       return;
     }
@@ -448,19 +477,89 @@ class TtsService extends GetxService {
     if (isPaused.value) return;
     _chunkIndex += 1;
     if (_chunkIndex >= _chunks.length) {
-      _endSession();
+      _onChapterFinished();
       return;
     }
-    _speakCurrentChunk();
+    _speakCurrentChunk(_sessionGen);
+  }
+
+  /// 本章读完：连播下一章或正常结束
+  Future<void> _onChapterFinished() async {
+    if (autoNextChapter.value && onChapterComplete != null) {
+      try {
+        await onChapterComplete!();
+        return;
+      } catch (e) {
+        Log.d("[TtsService] autoNextChapter failed: $e");
+      }
+    }
+    _endSession();
+  }
+
+  /// 跳到上一句
+  Future<void> previousChunk() async {
+    if (!isSessionActive.value || _chunks.isEmpty) return;
+    _chunkIndex = (_chunkIndex - 1).clamp(0, _chunks.length - 1);
+    _pauseRequested = false;
+    try {
+      await _tts.stop();
+    } catch (_) {}
+    await _speakCurrentChunk(_sessionGen);
+  }
+
+  /// 跳到下一句
+  Future<void> nextChunk() async {
+    if (!isSessionActive.value || _chunks.isEmpty) return;
+    _chunkIndex = (_chunkIndex + 1).clamp(0, _chunks.length - 1);
+    _pauseRequested = false;
+    try {
+      await _tts.stop();
+    } catch (_) {}
+    if (_chunkIndex >= _chunks.length) {
+      await _onChapterFinished();
+      return;
+    }
+    await _speakCurrentChunk(_sessionGen);
+  }
+
+  /// 设置睡眠定时（分钟；0 取消）
+  Future<void> setSleepTimer(int minutes) async {
+    sleepMinutes.value = minutes;
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    sleepRemaining.value = minutes;
+    if (minutes <= 0) return;
+    _sleepTimer = Timer.periodic(const Duration(minutes: 1), (t) async {
+      sleepRemaining.value -= 1;
+      if (sleepRemaining.value <= 0) {
+        t.cancel();
+        _sleepTimer = null;
+        sleepMinutes.value = 0;
+        await stop();
+      }
+    });
+  }
+
+  void _ensureSleepTimer() {
+    // 已有定时则保持；未设置则不动
+    if (sleepMinutes.value > 0 && _sleepTimer == null) {
+      setSleepTimer(sleepMinutes.value);
+    }
   }
 
   void _endSession() {
+    _sessionGen++;
     isSessionActive.value = false;
     isPlaying.value = false;
     isPaused.value = false;
     _chunks = const [];
     _chunkIndex = 0;
     sessionProgress.value = 0.0;
+    currentChunkIndex.value = -1;
+    currentChunkText.value = '';
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    sleepRemaining.value = 0;
   }
 
   List<String> _splitToChunks(String text) {

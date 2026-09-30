@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:easy_refresh/easy_refresh.dart';
 import 'package:flutter/foundation.dart';
@@ -29,11 +31,13 @@ void main() async {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
 
-  await Get.put(LocalStorageService()).init();
+  await Get.put(LocalStorageService()).init().timeout(const Duration(seconds: 8), onTimeout: () {});
   Get.put(ApiService());
   Get.put(ChapterDownloaderService());
   Get.put(DBService()).init();
-  await Get.put(TtsService()).init();
+  try {
+    await Get.put(TtsService()).init().timeout(const Duration(seconds: 12), onTimeout: () {});
+  } catch (_) {}
 
   if (_isWindows) {
     final availableVersion = await WebViewEnvironment.getAvailableVersion();
@@ -45,7 +49,7 @@ void main() async {
 
   _init();
   await Jiffy.setLocale(Util.getCurrentLocale().toString());
-  ApiService.instance.initCookie(); //初始化cookie
+  unawaited(ApiService.instance.initCookie()); //初始化cookie（异步，不阻塞启动）
 
   FlutterNativeSplash.remove();
 

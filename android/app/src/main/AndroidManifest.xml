@@ -5,6 +5,10 @@
         android:label="Hikari Novel"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
+        <!-- MuMu 等模拟器 Vulkan 黑屏/无响应：强制 Skia -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

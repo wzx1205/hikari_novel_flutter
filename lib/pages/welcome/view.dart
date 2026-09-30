@@ -25,7 +25,11 @@ class WelcomePage extends StatelessWidget {
             const SizedBox(height: 4),
             Text("welcome_tip".tr, style: TextStyle(fontSize: 14)),
             const SizedBox(height: 20),
-            FilledButton.icon(onPressed: () => Get.toNamed(RoutePath.login), label: Text("go_to_login".tr), icon: const Icon(Icons.login)),
+            FilledButton.icon(
+              onPressed: () => Get.toNamed(RoutePath.login),
+              label: Text("go_to_login".tr),
+              icon: const Icon(Icons.login),
+            ),
             const SizedBox(height: 40),
             PopupMenuButton<Wenku8Node>(
               onSelected: (Wenku8Node value) => controller.changeWenku8Node(value),
