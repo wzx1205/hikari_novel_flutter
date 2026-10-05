@@ -57,14 +57,20 @@ class _ReaderPageState extends State<ReaderPage> {
     super.dispose();
   }
 
-  EdgeInsets _contentPadding(BuildContext context, {required bool inPageStatusBar}) => EdgeInsets.fromLTRB(
-    controller.readerSettingsState.value.leftMargin,
-    controller.readerSettingsState.value.topMargin,
-    controller.readerSettingsState.value.rightMargin,
-    controller.readerSettingsState.value.showStatusBar
-        ? controller.readerSettingsState.value.bottomMargin + kStatusBarPadding + (inPageStatusBar ? MediaQuery.of(context).padding.bottom : 0)
-        : controller.readerSettingsState.value.bottomMargin,
-  );
+  EdgeInsets _contentPadding(BuildContext context, {required bool inPageStatusBar}) {
+    final settings = controller.readerSettingsState.value;
+    // edgeToEdge 下系统状态栏透明覆盖在内容上方，顶部必须让出其高度，否则
+    // 首行（章节标题/正文）会被状态栏遮住；沉浸模式下系统栏已隐藏则无需让出
+    final double topSafe = settings.immersionMode ? 0 : MediaQuery.of(context).padding.top;
+    return EdgeInsets.fromLTRB(
+      settings.leftMargin,
+      settings.topMargin + topSafe,
+      settings.rightMargin,
+      settings.showStatusBar
+          ? settings.bottomMargin + kStatusBarPadding + (inPageStatusBar ? MediaQuery.of(context).padding.bottom : 0)
+          : settings.bottomMargin,
+    );
+  }
 
   TextStyle get textStyle => TextStyle(
     fontFamily: controller.readerSettingsState.value.textFamily,
@@ -177,8 +183,8 @@ class _ReaderPageState extends State<ReaderPage> {
                                     tooltip: "listen_to_books".tr,
                                     onPressed: () async {
                                       final tts = TtsService.instance;
-                                      final text = controller.text.value;
-                                      final cleaned = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+                                      // 保留 \n\n 段落分隔：TTS 依赖它定位当前朗读段落（阅读页高亮跟随）
+                                      final cleaned = controller.text.value.trim();
                                       if (cleaned.isEmpty) {
                                         showSnackBar(message: "chapter_content_loading_tip".tr, context: context);
                                         return;
@@ -199,10 +205,10 @@ class _ReaderPageState extends State<ReaderPage> {
                                         controller.nextChapter();
                                         // 等待章节加载
                                         await Future.delayed(const Duration(milliseconds: 400));
-                                        final nextText = controller.text.value;
-                                        final cleaned = nextText.replaceAll(RegExp(r'\s+'), ' ').trim();
-                                        if (cleaned.isEmpty) return;
-                                        await tts.startChapter(cleaned, title: controller.chapterTitle.value);
+                                        final nextText = controller.text.value.trim();
+                                        if (nextText.isNotEmpty) {
+                                          await tts.startChapter(nextText, title: controller.chapterTitle.value);
+                                        }
                                       };
                                       await tts.startChapter(cleaned, title: controller.chapterTitle.value);
                                     },

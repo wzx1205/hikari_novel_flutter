@@ -122,10 +122,14 @@ class ApiService extends GetxService {
   }
 
   /// 获取书架
+  ///
+  /// 书架走 WebView 真导航抓取（navigateFetch）：文库 CF 对 bookcase.php 的
+  /// XHR 式请求一律 403（同 IP 实测浏览器导航可达），且 Worker 中继转发导航
+  /// 也会被按数据中心来源拦掉，故固定直连 wenku8.net。
   /// - [classId] 要获取的书架编号
   Future<Resource> getBookshelf({required int classId}) {
-    final String url = "${wenku8Node.node}/modules/article/bookcase.php?classid=$classId";
-    return _client.get(url, charsetType: charsetType);
+    final String url = "https://www.wenku8.net/modules/article/bookcase.php?classid=$classId";
+    return _client.getViaNavigation(url);
   }
 
   /// 获取其它用户收藏的书籍
@@ -422,6 +426,8 @@ class _ApiClient {
 
       Log.d("$url ${charsetType.name}");
       final res = await BrowserClient.fetch(url);
+      Log.d('[res] status=${res.statusCode} bytes=${res.body.length} url=${res.url} '
+          'loginWall=${res.looksLikeLoginWall} sessionExpired=${res.looksLikeSessionExpired}');
       final html = _decode(res, charsetType);
 
       if (res.statusCode == 403) return Error(cloudflare403ExceptionMessage);
@@ -429,6 +435,23 @@ class _ApiClient {
         return Error(sessionExpiredMessage);
       }
 
+      return Success(html);
+    } catch (e) {
+      Log.e(e.toString());
+      return Error(e.toString());
+    }
+  }
+
+  /// 会员页（书架等）：经 WebView 真导航抓取。
+  /// 返回的 HTML 已由浏览器解码为 UTF-8 文本，无需再做 GBK 转换。
+  Future<Resource> getViaNavigation(String url) async {
+    try {
+      final res = await BrowserClient.navigateFetch(url);
+      Log.d('[nav-res] bytes=${res.body.length} url=${res.url} '
+          'loginWall=${res.looksLikeLoginWall} sessionExpired=${res.looksLikeSessionExpired}');
+      final html = utf8.decode(res.body, allowMalformed: true);
+      if (res.looksLikeLoginWall) return Error(cloudflare403ExceptionMessage);
+      if (res.looksLikeSessionExpired) return Error(sessionExpiredMessage);
       return Success(html);
     } catch (e) {
       Log.e(e.toString());

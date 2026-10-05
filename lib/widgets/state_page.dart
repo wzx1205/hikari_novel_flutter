@@ -140,6 +140,8 @@ void showSnackBar({
 }) {
   // Create a SnackBar widget with specified properties
   var snack = SnackBar(
+    // 带 margin 必须用 floating（Flutter 框架断言：margin can only be used with floating behavior）
+    behavior: SnackBarBehavior.floating,
     margin: const EdgeInsets.symmetric(vertical: 20, horizontal: 10), // Set margin around the SnackBar
     duration: duration ?? const Duration(milliseconds: 4000), // Default duration if not provided
     content: Text(

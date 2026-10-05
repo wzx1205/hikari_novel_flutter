@@ -41,12 +41,39 @@ export default {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
     headers.set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
     headers.set("Accept-Language", "zh-CN,zh;q=0.9");
+    // 补全真实浏览器会带的指纹头：文库 CF 对 bookcase 等受保护路径会按
+    // "非浏览器特征"拦截数据中心来源的请求，缺 sec-fetch / sec-ch-ua 是硬伤
+    headers.set("sec-ch-ua", '"Chromium";v="131", "Not_A Brand";v="24"');
+    headers.set("sec-ch-ua-mobile", "?0");
+    headers.set("sec-ch-ua-platform", '"Windows"');
+    headers.set("sec-fetch-dest", "document");
+    headers.set("sec-fetch-mode", "navigate");
+    headers.set("sec-fetch-site", "none");
+    headers.set("sec-fetch-user", "?1");
+    headers.set("upgrade-insecure-requests", "1");
     headers.delete("cf-connecting-ip");
     headers.delete("x-forwarded-for");
     headers.delete("x-real-ip");
     headers.delete("cf-ipcountry");
     headers.delete("cf-ray");
     headers.delete("cf-visitor");
+
+    // 关键：剥离 Cookie 里的 Cloudflare 凭证。cf_clearance 与 客户端IP+UA 绑定，
+    // 从 Worker 出口 IP 转发过去等于伪造凭证，CF 会在受保护路径（如 bookcase.php）
+    // 上直接 403 硬拦；业务 cookie（jieqi* / PHPSESSID）保留
+    const rawCookie = headers.get("Cookie");
+    if (rawCookie) {
+      const cfCookieNames = ["cf_clearance", "__cf_bm", "cf_chl_prog", "cf_chl_seq", "cf_chl_hostname", "cf_chl_2", "cf_chl_race_test", "CFAU", "CFSVC"];
+      const kept = rawCookie
+        .split(";")
+        .map((c) => c.trim())
+        .filter((c) => c && !cfCookieNames.includes(c.split("=")[0].trim()));
+      if (kept.length) {
+        headers.set("Cookie", kept.join("; "));
+      } else {
+        headers.delete("Cookie");
+      }
+    }
 
     const req = new Request(url.toString(), {
       method: request.method,

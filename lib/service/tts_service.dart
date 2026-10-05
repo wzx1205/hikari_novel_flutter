@@ -43,6 +43,9 @@ class TtsService extends GetxService {
   final currentChunkIndex = (-1).obs;
   final currentChunkText = ''.obs;
 
+  /// 当前正在朗读的段落索引（对应阅读页 text.split('\n\n') 的段落序号；-1 = 无）
+  final currentParagraphIndex = (-1).obs;
+
   /// 会话代际：换章/停止时递增，丢弃过期 completion 回调
   int _sessionGen = 0;
 
@@ -58,6 +61,7 @@ class TtsService extends GetxService {
   Future<void> Function()? onChapterComplete;
 
   List<String> _chunks = const [];
+  List<int> _chunkParagraphs = const [];
   int _chunkIndex = 0;
 
   static const int _maxChunkLen = 140;
@@ -308,7 +312,8 @@ class TtsService extends GetxService {
   Future<void> startChapter(String fullText, {String title = ''}) async {
     if (!enabled.value) return;
     await _prepareForSpeak();
-    final cleaned = fullText.replaceAll(RegExp(r'\s+'), ' ').trim();
+    // 只折叠空白字符，保留 \n\n 段落分隔，供朗读时定位当前段落（阅读页高亮跟随）
+    final cleaned = fullText.replaceAll(RegExp(r'[^\S\n]+'), ' ').trim();
     if (cleaned.isEmpty) return;
 
     _sessionGen++;
@@ -317,11 +322,14 @@ class TtsService extends GetxService {
     isSessionActive.value = true;
     isPaused.value = false;
 
-    _chunks = _splitToChunks(cleaned);
+    final pairs = _splitToChunks(cleaned);
+    _chunks = [for (final p in pairs) p.$1];
+    _chunkParagraphs = [for (final p in pairs) p.$2];
     _chunkIndex = 0;
     sessionProgress.value = 0.0;
     currentChunkIndex.value = 0;
     currentChunkText.value = _chunks.isEmpty ? '' : _chunks.first;
+    currentParagraphIndex.value = _chunkParagraphs.isEmpty ? -1 : _chunkParagraphs.first;
 
     lastSpokenText.value = cleaned;
     await _speakCurrentChunk(gen);
@@ -401,6 +409,7 @@ class TtsService extends GetxService {
     final chunk = _chunks[_chunkIndex];
     currentChunkIndex.value = _chunkIndex;
     currentChunkText.value = chunk;
+    currentParagraphIndex.value = _chunkIndex < _chunkParagraphs.length ? _chunkParagraphs[_chunkIndex] : -1;
     try {
       final r = await _tts.speak(chunk);
       if (gen != null && gen != _sessionGen) return;
@@ -553,38 +562,50 @@ class TtsService extends GetxService {
     isPlaying.value = false;
     isPaused.value = false;
     _chunks = const [];
+    _chunkParagraphs = const [];
     _chunkIndex = 0;
     sessionProgress.value = 0.0;
     currentChunkIndex.value = -1;
     currentChunkText.value = '';
+    currentParagraphIndex.value = -1;
     _sleepTimer?.cancel();
     _sleepTimer = null;
     sleepRemaining.value = 0;
   }
 
-  List<String> _splitToChunks(String text) {
-    final parts = text.split(RegExp(r'(?<=[。！？!?；;])')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+  /// 按段落切分：先按 \n\n 拆段，再在段内按句读切句块，句块归属其所在段落。
+  /// 返回 (句块文本, 段落索引) 列表，供阅读页高亮当前朗读段落。
+  List<(String, int)> _splitToChunks(String text) {
+    final paragraphs = text.split('\n\n').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
 
-    final chunks = <String>[];
-    final buf = StringBuffer();
-    for (final p in parts.isEmpty ? [text] : parts) {
-      if (buf.length + p.length <= _maxChunkLen) {
-        buf.write(p);
-      } else {
+    final chunks = <(String, int)>[];
+    for (var pi = 0; pi < paragraphs.length; pi++) {
+      final para = paragraphs[pi];
+      final parts = para.split(RegExp(r'(?<=[。！？!?；;])')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      final buf = StringBuffer();
+      void flush() {
         if (buf.isNotEmpty) {
-          chunks.add(buf.toString());
+          chunks.add((buf.toString(), pi));
           buf.clear();
         }
-        if (p.length <= _maxChunkLen) {
+      }
+
+      for (final p in parts.isEmpty ? [para] : parts) {
+        if (buf.length + p.length <= _maxChunkLen) {
           buf.write(p);
         } else {
-          for (var i = 0; i < p.length; i += _maxChunkLen) {
-            chunks.add(p.substring(i, (i + _maxChunkLen).clamp(0, p.length)));
+          flush();
+          if (p.length <= _maxChunkLen) {
+            buf.write(p);
+          } else {
+            for (var i = 0; i < p.length; i += _maxChunkLen) {
+              chunks.add((p.substring(i, (i + _maxChunkLen).clamp(0, p.length)), pi));
+            }
           }
         }
       }
+      flush();
     }
-    if (buf.isNotEmpty) chunks.add(buf.toString());
     return chunks;
   }
 }

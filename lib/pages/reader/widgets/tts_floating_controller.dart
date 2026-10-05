@@ -78,12 +78,14 @@ class _TtsFloatingControllerState extends State<TtsFloatingController> {
                     overflow: TextOverflow.ellipsis,
                     style: kBaseTileSubtitleTextStyle.copyWith(color: fg),
                   ),
-                  if (tts.sleepRemaining.value > 0)
-                    Text(
-                      "${tts.sleepRemaining.value} min",
-                      maxLines: 1,
-                      style: kBaseTileSubtitleTextStyle.copyWith(color: fg.withValues(alpha: 0.6), fontSize: 10),
-                    ),
+                  Text(
+                    tts.sleepRemaining.value > 0
+                        ? "${tts.sleepRemaining.value} min"
+                        : (tts.currentChunkText.value.isEmpty ? "listen_to_books".tr : tts.currentChunkText.value),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: kBaseTileSubtitleTextStyle.copyWith(color: fg.withValues(alpha: 0.6), fontSize: 10),
+                  ),
                 ],
               ),
             ),
@@ -102,14 +104,14 @@ class _TtsFloatingControllerState extends State<TtsFloatingController> {
                 } else if (tts.isPaused.value && tts.isSessionActive.value) {
                   await tts.resumeSession();
                 } else {
-                  final text = reader.text.value;
-                  final cleaned = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+                  // 保留 \n\n 段落分隔：TTS 依赖它定位当前朗读段落（阅读页高亮跟随）
+                  final cleaned = reader.text.value.trim();
                   if (cleaned.isNotEmpty) {
                     tts.autoNextChapter.value = true;
                     tts.onChapterComplete = () async {
                       reader.nextChapter();
                       await Future.delayed(const Duration(milliseconds: 400));
-                      final nextText = reader.text.value.replaceAll(RegExp(r'\s+'), ' ').trim();
+                      final nextText = reader.text.value.trim();
                       if (nextText.isNotEmpty) {
                         await tts.startChapter(nextText, title: reader.chapterTitle.value);
                       }

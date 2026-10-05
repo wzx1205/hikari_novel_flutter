@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
@@ -5,6 +7,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 
 import '../../../router/route_path.dart';
 import '../../../common/constants.dart';
+import '../../../service/tts_service.dart';
 
 class VerticalReadPage extends StatefulWidget {
   final String text;
@@ -47,18 +50,45 @@ class VerticalReadPageState extends State<VerticalReadPage> {
 
   late String _lastLayoutSig;
 
+  /// TTS 朗读跟随：段落 key（定位滚动用）+ 订阅当前朗读段落
+  final Map<int, GlobalKey> _paraKeys = {};
+  StreamSubscription<int>? _ttsParaSub;
+  int _ttsFocusedPara = -1;
+
   @override
   void initState() {
     super.initState();
     _lastLayoutSig = _layoutSignature();
     _initController();
     resetPage();
+    _ttsParaSub = TtsService.instance.currentParagraphIndex.listen(_focusParagraph);
   }
 
   @override
   void dispose() {
+    _ttsParaSub?.cancel();
     controller.dispose();
     super.dispose();
+  }
+
+  /// TTS 朗读段落变化：滚动到目标段落（高亮由段落自身 Obx 响应）
+  void _focusParagraph(int para) {
+    if (para < 0 || !mounted) return;
+    if (_ttsFocusedPara == para) return;
+    _ttsFocusedPara = para;
+
+    final key = _paraKeys[para];
+    if (key != null && key.currentContext != null) {
+      Scrollable.ensureVisible(key.currentContext!, duration: const Duration(milliseconds: 300), alignment: 0.15);
+      return;
+    }
+    // 目标段落不在可视区（未构建）：按段落比例估算滚动位置，待其构建后由下一次高亮精确定位
+    if (!controller.hasClients) return;
+    final max = controller.position.maxScrollExtent;
+    if (max <= 0) return;
+    final textCount = _items.where((e) => e.type == ReaderItemType.text).length;
+    if (textCount <= 0) return;
+    controller.jumpTo((para / textCount * max).clamp(0.0, max));
   }
 
   double get currentPositionPixels => controller.position.pixels;
@@ -122,6 +152,7 @@ class VerticalReadPageState extends State<VerticalReadPage> {
     }
 
     _splitItems();
+    _paraKeys.clear();
     setState(() {});
   }
 
@@ -165,8 +196,9 @@ class VerticalReadPageState extends State<VerticalReadPage> {
               final item = _items[index];
 
               switch (item.type) {
+                // 文本段排在最前，段落序号即 sliver index
                 case ReaderItemType.text:
-                  return _buildText(item.content);
+                  return _buildText(item.content, index);
                 case ReaderItemType.image:
                   return _buildImage(item.content, item.index!);
               }
@@ -177,22 +209,37 @@ class VerticalReadPageState extends State<VerticalReadPage> {
     );
   }
 
-  Widget _buildText(String content) {
+  Widget _buildText(String content, int paraIndex) {
+    final key = _paraKeys.putIfAbsent(paraIndex, () => GlobalKey());
     return RepaintBoundary(
-      child: Padding(
-        padding: EdgeInsets.only(bottom: paraSpacing.toDouble()),
-        child: RichText(
-          text: TextSpan(
-            style: textStyle,
-            children: [
-              WidgetSpan(
-                child: SizedBox(width: textStyle.fontSize! * paraIndent), //按汉字宽度缩进
-              ),
-              TextSpan(text: content),
-            ],
+      key: key,
+      child: Obx(() {
+        final tts = TtsService.instance;
+        final focused = tts.isSessionActive.value &&
+            (tts.isPlaying.value || tts.isPaused.value) &&
+            tts.currentParagraphIndex.value == paraIndex;
+        return Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: focused ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.45) : null,
+            borderRadius: BorderRadius.circular(6),
           ),
-        ),
-      ),
+          child: Padding(
+            padding: EdgeInsets.only(bottom: paraSpacing.toDouble()),
+            child: RichText(
+              text: TextSpan(
+                style: textStyle,
+                children: [
+                  WidgetSpan(
+                    child: SizedBox(width: textStyle.fontSize! * paraIndent), //按汉字宽度缩进
+                  ),
+                  TextSpan(text: content),
+                ],
+              ),
+            ),
+          ),
+        );
+      }),
     );
   }
 
